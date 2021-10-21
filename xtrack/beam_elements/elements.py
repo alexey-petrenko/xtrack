@@ -160,6 +160,41 @@ class SRotation(BeamElement):
 SRotation.XoStruct.extra_sources = [
         _pkg_root.joinpath('beam_elements/elements_src/srotation.h')]
 
+
+
+class IonLaserIP(BeamElement):
+    '''Beam element modeling partially stripped ion excitation and emission. Parameters:
+
+                - angle [deg]: Angle between the reference trajectory and the laser. Default is ``0``.
+
+    '''
+
+    # first test with code form SRotation:
+
+    _xofields={
+        'cos_z': xo.Float64,
+        'sin_z': xo.Float64,
+        }
+
+    def __init__(self, angle=0, **nargs):
+        anglerad = angle / 180 * np.pi
+        nargs['cos_z']=np.cos(anglerad)
+        nargs['sin_z']=np.sin(anglerad)
+        super().__init__(**nargs)
+
+    @property
+    def angle(self):
+        return np.arctan2(self.sin_z, self.cos_z) * (180.0 / np.pi)
+
+    def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
+        return self.__class__(
+                              angle=-self.angle,
+                              _context=_context, _buffer=_buffer, _offset=_offset)
+
+IonLaserIP.XoStruct.extra_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/ionlaserip.h')]
+
+
 class Multipole(BeamElement):
     '''Beam element modeling a thin magnetic multipole. Parameters:
 
