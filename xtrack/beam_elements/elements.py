@@ -164,32 +164,87 @@ SRotation.XoStruct.extra_sources = [
 
 class IonLaserIP(BeamElement):
     '''Beam element modeling partially stripped ion excitation and emission. Parameters:
-
-                - angle [deg]: Angle between the reference trajectory and the laser. Default is ``0``.
-
+                  Gaussian laser pulse is assumed (en.wikipedia.org/wiki/Gaussian_beam)
+                - laser_direction_nx,..._ny,..._nz: Laser direction vector. Default is ``0,0,-1``.
+                - laser_waist_x,..._y,..._z [m]: Laser waist location. Default is ``0,0,0``.
+                - laser_waist_radius [m]: Laser waist radius.
+                  Laser intensity vs radius at waist I(r)=exp(-2r^2/w_0^2),
+                  where w_0 is the laser_waist_radius. Default is ``1e-2``.
+                - laser_energy [J]: Total laser pulse energy. Default is ``0``.
+                - laser_duration_sigma [sec]: Laser duration. Default is ``1e-12``.
+                - laser_frequency [Hz]: Central frequency of the laser. Default is ``1e15``.
+                - laser_uncorrelated_frequency_spread_sigma [Hz]: Uncorrelated frequency spread
+                  of the laser. For a Fourier-limited pulse 2pi*sigma_f = 1/sigma_t.
+                  Default is ``159e9``.
+                - laser_frequency_chirp [Hz/sec]: Frequency chirp of the laser df/dt. Default is ``0``.
+                - laser_time_delay [sec]: time delay (in the lab frame) between the reference particle
+                  entering this element and the laser pulse passing through its waist location.
+                  Default is ``0``.
+                - ion_excitation_energy [eV]: Transition energy in the ion. Default is ``68.6e3``.
+                - ion_excitation_g1,..._g2: Degeneracy factors of the ion levels. Default is ``1,3``.
+                - ion_excited_lifetime [s]: Lifetime of the exited state. Default is ``3.9e-17``.
     '''
 
-    # first test with code form SRotation:
-
     _xofields={
-        'cos_z': xo.Float64,
-        'sin_z': xo.Float64,
-        }
+               'laser_direction_nx':   xo.Float64,
+               'laser_direction_ny':   xo.Float64,
+               'laser_direction_nz':   xo.Float64,
+               'laser_waist_x':        xo.Float64,
+               'laser_waist_y':        xo.Float64,
+               'laser_waist_z':        xo.Float64,
+               'laser_waist_radius':   xo.Float64,
+               'laser_energy':         xo.Float64,
+               'laser_duration_sigma': xo.Float64,
+               'laser_frequency':      xo.Float64,
+               'laser_uncorrelated_frequency_spread_sigma': xo.Float64,
+               'laser_frequency_chirp': xo.Float64,
+               'laser_time_delay':      xo.Float64,
+               'ion_excitation_energy': xo.Float64,
+               'ion_excitation_g1':     xo.Float64,
+               'ion_excitation_g2':     xo.Float64,
+               'ion_excited_lifetime':  xo.Float64,
+              }
 
-    def __init__(self, angle=0, **nargs):
-        anglerad = angle / 180 * np.pi
-        nargs['cos_z']=np.cos(anglerad)
-        nargs['sin_z']=np.sin(anglerad)
-        super().__init__(**nargs)
-
-    @property
-    def angle(self):
-        return np.arctan2(self.sin_z, self.cos_z) * (180.0 / np.pi)
+    def __init__(self,  laser_direction_nx =  0,
+                        laser_direction_ny =  0,
+                        laser_direction_nz = -1,
+                        laser_waist_x = 0,
+                        laser_waist_y = 0,
+                        laser_waist_z = 0,
+                        laser_waist_radius = 1e-2,
+                        laser_energy = 0,
+                        laser_duration_sigma = 1e-12,
+                        laser_frequency = 1e15,
+                        laser_uncorrelated_frequency_spread_sigma = 159e9,
+                        laser_frequency_chirp = 0,
+                        laser_time_delay = 0,
+                        ion_excitation_energy = 68.6e3,
+                        ion_excitation_g1 = 1,
+                        ion_excitation_g2 = 3,
+                        ion_excited_lifetime = 3.9e-17,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.laser_direction_nx    = laser_direction_nx
+        self.laser_direction_ny    = laser_direction_ny
+        self.laser_direction_nz    = laser_direction_nz
+        self.laser_waist_x         = laser_waist_x
+        self.laser_waist_y         = laser_waist_y
+        self.laser_waist_z         = laser_waist_z
+        self.laser_waist_radius    = laser_waist_radius
+        self.laser_duration_sigma  = laser_duration_sigma
+        self.laser_frequency       = laser_frequency
+        self.laser_uncorrelated_frequency_spread_sigma = laser_uncorrelated_frequency_spread_sigma
+        self.laser_frequency_chirp = laser_frequency_chirp
+        self.laser_time_delay      = laser_time_delay
+        self.ion_excitation_energy = ion_excitation_energy
+        self.ion_excitation_g1     = ion_excitation_g1
+        self.ion_excitation_g2     = ion_excitation_g2
+        self.ion_excited_lifetime  = ion_excited_lifetime
 
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
-                              angle=-self.angle,
                               _context=_context, _buffer=_buffer, _offset=_offset)
+
 
 IonLaserIP.XoStruct.extra_sources = [
         _pkg_root.joinpath('beam_elements/elements_src/ionlaserip.h')]
