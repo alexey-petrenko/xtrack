@@ -163,83 +163,82 @@ SRotation.XoStruct.extra_sources = [
 
 
 class IonLaserIP(BeamElement):
-    '''Beam element modeling partially stripped ion excitation and emission. Parameters:
+    '''Beam element modeling partially stripped ion excitation and emission of photons. Parameters:
                   Gaussian laser pulse is assumed (en.wikipedia.org/wiki/Gaussian_beam)
-                - laser_direction_nx,..._ny,..._nz: Laser direction vector. Default is ``0,0,-1``.
-                - laser_waist_x,..._y,..._z [m]: Laser waist location. Default is ``0,0,0``.
+                - laser_direction_nx,..._ny,..._nz: Laser direction vector n. Default is ``0,0,-1``.
+                - laser_x,..._y,..._z [m]: Laser pulse center location at t=0. Default is ``0,0,0``.
+                - laser_waist_shift [m]: How far is the laser waist from the laser pulse center
+                  along the n vector at t=0. Default is ``0``.
                 - laser_waist_radius [m]: Laser waist radius.
                   Laser intensity vs radius at waist I(r)=exp(-2r^2/w_0^2),
-                  where w_0 is the laser_waist_radius. Default is ``1e-2``.
+                  where w_0 is the laser_waist_radius. Default is ``1e-3``.
                 - laser_energy [J]: Total laser pulse energy. Default is ``0``.
                 - laser_duration_sigma [sec]: Laser duration. Default is ``1e-12``.
-                - laser_frequency [Hz]: Central frequency of the laser. Default is ``1e15``.
-                - laser_uncorrelated_frequency_spread_sigma [Hz]: Uncorrelated frequency spread
-                  of the laser. For a Fourier-limited pulse 2pi*sigma_f = 1/sigma_t.
-                  Default is ``159e9``.
-                - laser_frequency_chirp [Hz/sec]: Frequency chirp of the laser df/dt. Default is ``0``.
-                - laser_time_delay [sec]: time delay (in the lab frame) between the reference particle
-                  entering this element and the laser pulse passing through its waist location.
-                  Default is ``0``.
+                  assuming Fourier-limited pulse so far: sigma_w = 1/sigma_t.
+                - laser_wavelength [m]: Central wavelength of the laser. Default is ``1034.0e-9``.
                 - ion_excitation_energy [eV]: Transition energy in the ion. Default is ``68.6e3``.
                 - ion_excitation_g1,..._g2: Degeneracy factors of the ion levels. Default is ``1,3``.
                 - ion_excited_lifetime [s]: Lifetime of the exited state. Default is ``3.9e-17``.
     '''
 
     _xofields={
-               'laser_direction_nx':   xo.Float64,
-               'laser_direction_ny':   xo.Float64,
-               'laser_direction_nz':   xo.Float64,
-               'laser_waist_x':        xo.Float64,
-               'laser_waist_y':        xo.Float64,
-               'laser_waist_z':        xo.Float64,
-               'laser_waist_radius':   xo.Float64,
-               'laser_energy':         xo.Float64,
-               'laser_duration_sigma': xo.Float64,
-               'laser_frequency':      xo.Float64,
-               'laser_uncorrelated_frequency_spread_sigma': xo.Float64,
-               'laser_frequency_chirp': xo.Float64,
-               'laser_time_delay':      xo.Float64,
+               'laser_direction_nx':    xo.Float64,
+               'laser_direction_ny':    xo.Float64,
+               'laser_direction_nz':    xo.Float64,
+               'laser_x':               xo.Float64,
+               'laser_y':               xo.Float64,
+               'laser_z':               xo.Float64,
+               'laser_waist_shift':     xo.Float64,
+               'laser_waist_radius':    xo.Float64,
+               'laser_energy':          xo.Float64,
+               'laser_duration_sigma':  xo.Float64,
+               'laser_wavelength':      xo.Float64,
                'ion_excitation_energy': xo.Float64,
                'ion_excitation_g1':     xo.Float64,
                'ion_excitation_g2':     xo.Float64,
                'ion_excited_lifetime':  xo.Float64,
+               'Map_of_Excitation_vs_Intensity_and_Detuning': xo.Float64[100000],
               }
 
     def __init__(self,  laser_direction_nx =  0,
                         laser_direction_ny =  0,
                         laser_direction_nz = -1,
-                        laser_waist_x = 0,
-                        laser_waist_y = 0,
-                        laser_waist_z = 0,
-                        laser_waist_radius = 1e-2,
+                        laser_x = 0,
+                        laser_y = 0,
+                        laser_z = 0,
+                        laser_waist_shift = 0,
+                        laser_waist_radius = 1e-3,
                         laser_energy = 0,
                         laser_duration_sigma = 1e-12,
-                        laser_frequency = 1e15,
-                        laser_uncorrelated_frequency_spread_sigma = 159e9,
-                        laser_frequency_chirp = 0,
-                        laser_time_delay = 0,
+                        # assuming Fourier-limited pulse so far: sigma_w = 1/sigma_t
+                        laser_wavelength = 1034.0e-9, # m
                         ion_excitation_energy = 68.6e3,
-                        ion_excitation_g1 = 1,
-                        ion_excitation_g2 = 3,
+                        ion_excitation_g1 = 2,
+                        ion_excitation_g2 = 2,
                         ion_excited_lifetime = 3.9e-17,
+                        Map_of_Excitation_vs_Intensity_and_Detuning = None,
                  **kwargs):
         super().__init__(**kwargs)
         self.laser_direction_nx    = laser_direction_nx
         self.laser_direction_ny    = laser_direction_ny
         self.laser_direction_nz    = laser_direction_nz
-        self.laser_waist_x         = laser_waist_x
-        self.laser_waist_y         = laser_waist_y
-        self.laser_waist_z         = laser_waist_z
+        self.laser_x               = laser_x
+        self.laser_y               = laser_y
+        self.laser_z               = laser_z
+        self.laser_waist_shift     = laser_waist_shift
+        self.laser_energy          = laser_energy
         self.laser_waist_radius    = laser_waist_radius
         self.laser_duration_sigma  = laser_duration_sigma
-        self.laser_frequency       = laser_frequency
-        self.laser_uncorrelated_frequency_spread_sigma = laser_uncorrelated_frequency_spread_sigma
-        self.laser_frequency_chirp = laser_frequency_chirp
-        self.laser_time_delay      = laser_time_delay
+        self.laser_wavelength      = laser_wavelength
         self.ion_excitation_energy = ion_excitation_energy
         self.ion_excitation_g1     = ion_excitation_g1
         self.ion_excitation_g2     = ion_excitation_g2
         self.ion_excited_lifetime  = ion_excited_lifetime
+        if Map_of_Excitation_vs_Intensity_and_Detuning is None:
+            self.Map_of_Excitation_vs_Intensity_and_Detuning = np.linspace(100, 200, 100000)
+        else:
+            self.Map_of_Excitation_vs_Intensity_and_Detuning = \
+            Map_of_Excitation_vs_Intensity_and_Detuning
 
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
