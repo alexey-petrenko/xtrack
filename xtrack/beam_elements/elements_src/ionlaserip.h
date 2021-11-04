@@ -4,11 +4,12 @@
 /*gpufun*/
 void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
 
-    //The algorithm is from https://anaconda.org/petrenko/psi_beam_vs_laser
+    //The algorithm is partially from https://anaconda.org/petrenko/psi_beam_vs_laser
 
     double const nx  = IonLaserIPData_get_laser_direction_nx(el);
     double const ny  = IonLaserIPData_get_laser_direction_ny(el);
     double const nz  = IonLaserIPData_get_laser_direction_nz(el);
+    
     double const laser_x = IonLaserIPData_get_laser_x(el);
     double const laser_y = IonLaserIPData_get_laser_y(el);
     double const laser_z = IonLaserIPData_get_laser_z(el);
@@ -18,7 +19,7 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     double const laser_waist_shift = IonLaserIPData_get_laser_waist_shift(el);
 
     double const laser_sigma_t = IonLaserIPData_get_laser_duration_sigma(el);
-    double const laser_sigma_w = 1/laser_sigma_t; // rad/sec -- assuming Fourier-limited pulse
+    //double const laser_sigma_w = 1/laser_sigma_t; // rad/sec -- assuming Fourier-limited pulse
 
     double const laser_wavelength = IonLaserIPData_get_laser_wavelength(el); // Hz
     double const c = 299792458.0; // m/s
@@ -32,6 +33,8 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     int64_t const N_DeltaDetuningTau_values = IonLaserIPData_get_N_DeltaDetuningTau_values(el);
     double  const OmegaRabiTau_max = IonLaserIPData_get_OmegaRabiTau_max(el);
     double  const DeltaDetuningTau_max = IonLaserIPData_get_DeltaDetuningTau_max(el);
+    double  const dOmegaRabiTau = OmegaRabiTau_max/(N_OmegaRabiTau_values-1.0);
+    double  const dDeltaDetuningTau = DeltaDetuningTau_max/(N_DeltaDetuningTau_values-1.0);
     
     double const laser_Rayleigh_length = PI*w0*w0/laser_wavelength;
     //printf("\nlaser_Rayleigh_length=%e m\n",laser_Rayleigh_length); exit(1);
@@ -40,12 +43,22 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     double const m0  = LocalParticle_get_mass0(part0); // eV/c^2
     //printf("m0=%e,p0c=%e,p0c/m0=%f\n",m0,p0c,p0c/m0);
     double const hbar = 1.054571817e-34; // J*sec
+    
+    
+    //double const gamma0 = sqrt(1.0 + p0c*p0c/(m0*m0));
+    //double const beta0  = sqrt(1.0 - 1.0/(gamma0*gamma0));
+    double const OmegaTransition = ion_excitation_energy*eV/hbar; // rad/sec
+    //printf("2.0*PI*c/OmegaTransition = %e m, laser_wavelength=%e m\n",
+    //        2.0*PI*c/OmegaTransition, laser_wavelength/((1.0+beta0)*gamma0)); exit(0);
 
     // Maximum laser intensity (at the focal point)
     double const I0 = sqrt(2/PI)*(laser_energy/laser_sigma_t)/(PI*w0*w0); // W/m^2
     
     double state,delta,z,x,y,px,py,pc,gamma,beta,beta_x,beta_y,beta_z,vx,vy,vz,tcol;
-    double r2, Z_to_laser_focus, I, OmegaRabi, OmegaRabiTau, w;
+    double r2, Z_to_laser_focus, I, OmegaRabi, OmegaRabiTau, DeltaDetuningTau, w;
+    double laser_omega_ion_frame, cos_theta, excitation_probability, rnd;
+    
+    int64_t row, col, idx;
 
     //start_per_particle_block (part0->part)
     
@@ -98,33 +111,71 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     
         OmegaRabiTau = OmegaRabi*laser_sigma_t/(2.0*gamma); // in the ion rest frame
     
+        // Detuning from the ion transition resonance in the ion rest frame:
+        
+        cos_theta = -(nx*vx + ny*vy + nz*vz)/(beta*c);
+        laser_omega_ion_frame = (2.0*PI*c/laser_wavelength)*(1.0+beta*cos_theta)*gamma;
+        DeltaDetuningTau = fabs(
+            (OmegaTransition - laser_omega_ion_frame)*laser_sigma_t/(2.0*gamma)
+        );
+        //printf("DeltaDetuningTau = %e\n", DeltaDetuningTau); if (ii>15) {exit(0);}
+            
         //Test:
         if (state > 0)
         {
             // Map_of_Excitation vs OmegaRabi and Detuning:
-            double v0 = IonLaserIPData_get_Map_of_Excitation(el, 0);
-            double v1 = IonLaserIPData_get_Map_of_Excitation(el, 1);
-            double v2 = IonLaserIPData_get_Map_of_Excitation(el, 999);
+            //double v0 = IonLaserIPData_get_Map_of_Excitation(el, 0);
+            //double v1 = IonLaserIPData_get_Map_of_Excitation(el, 1);
+            //double v2 = IonLaserIPData_get_Map_of_Excitation(el, 999);
             //printf("\n\nTest v0=%e, v1=%e, v2=%e\n\n",v0,v1,v2); exit(1);
-            if (OmegaRabiTau > 1.5)
+            if (DeltaDetuningTau < DeltaDetuningTau_max && OmegaRabiTau > OmegaRabiTau_max)
             {
-                LocalParticle_set_state(part, 2);
+                // In case of a very high laser field:
+                LocalParticle_set_state(part, 2); // Excited particle
+            }
+            else if (DeltaDetuningTau < DeltaDetuningTau_max &&
+                OmegaRabiTau > dOmegaRabiTau/10.0)
+            {
+                // N_OmegaRabiTau_values  N_DeltaDetuningTau_values
+                //   OmegaRabiTau_max       DeltaDetuningTau_max
+                 
+                row = (int)floor(OmegaRabiTau/dOmegaRabiTau);
+                col = (int)floor(DeltaDetuningTau/dDeltaDetuningTau);
+                idx = row*N_DeltaDetuningTau_values + col;
+                
+                excitation_probability = IonLaserIPData_get_Map_of_Excitation(el, idx);
+                //printf("%.3f, %.3f, %.3f\n",OmegaRabiTau,DeltaDetuningTau,
+                //      excitation_probability);
+                //if (ii>19998){exit(0);}
+                
+                rnd = (float)rand()/(float)(RAND_MAX);
+                if ( rnd < excitation_probability )
+                {
+                    LocalParticle_set_state(part, 2); // Excited particle
+                    
+                    // photon recoil (from emitted photon!):
+                    rnd = (float)rand()/(float)(RAND_MAX);
+                    LocalParticle_add_to_energy(part,
+                                                -ion_excitation_energy*rnd*2.0*gamma); // eV
+                } else {
+                    LocalParticle_set_state(part, 1); // Still particle
+                }
             }
             else {
-                LocalParticle_set_state(part, 1);
+                LocalParticle_set_state(part, 1); // Still particle
             }
         }
         
         // ...
         // laser cooling demostration -- temporary !!!!
         
-        if (delta > 0)
-        {
-            //LocalParticle_add_to_energy(part, -5e6); // eV
-        }    
+        //if (delta > 0)
+        //{
+        //    //LocalParticle_add_to_energy(part, -5e6); // eV
+        //}    
 
     //end_per_particle_block
-
+    
 }
 
 #endif

@@ -8,8 +8,8 @@ import xtrack as xt
 
 fname_sequence = '../../test_data/sps_w_spacecharge/line_no_spacecharge_and_particle.json'
 
-num_turns = int(100)
-n_part = 1000
+num_turns = int(20)
+n_part = 10000
 
 ####################
 # Choose a context #
@@ -39,6 +39,10 @@ idx = sequence.find_element_ids(name)[0]
 cav = sequence.elements[idx]
 cav.voltage = 7e6 # V
 
+# Gamma Factory Proof-of-Principle Experiment at the SPS:
+# http://cds.cern.ch/record/2690736
+# Paramaters from Table 3 (page 20)
+
 # Ion mass
 m_u = 931.49410242e6 # eV/c^2 -- atomic mass unit
 A = 207.98 # Lead-208
@@ -46,7 +50,7 @@ Z = 82  # Number of protons in the ion (Lead)
 Ne = 3 # Number of remaining electrons (Lithium-like)
 m_e = 0.511e6 # eV/c^2 -- electron mass
 m_p = 938.272088e6 # eV/c^2 -- proton mass
-c = 299792458 # m/s
+c = 299792458.0 # m/s
 
 m_ion = A*m_u + Ne*m_e # eV/c^2
 
@@ -59,7 +63,7 @@ gamma_p = np.sqrt( 1 + (equiv_proton_momentum/m_p)**2 ) # equvalent gamma for pr
 
 p0c = equiv_proton_momentum*(Z-Ne) # eV/c
 gamma = np.sqrt( 1 + (p0c/m_ion)**2 ) # ion relativistic factor
-print("Ion gamma = %.3f" % gamma)
+print("Ion gamma = %e" % gamma)
 
 beta = np.sqrt(1-1/(gamma*gamma)) # ion beta
 
@@ -78,10 +82,12 @@ lambda_0 = 2*np.pi*hc/hw0 # m -- ion excitation wavelength
 
 lambda_l = lambda_0*gamma*(1 + beta*np.cos(theta_l)) # m -- laser wavelength
 # Shift laser wavelength for fast longitudinal cooling:
-lambda_l = lambda_l*(1+sigma_dp) # m
+#lambda_l = lambda_l*(1+sigma_dp) # m
 
 laser_frequency = c/lambda_l # Hz
-sigma_w = 2*np.pi*laser_frequency*sigma_dp/2 # for fast longitudinal cooling
+sigma_w = 2*np.pi*laser_frequency*sigma_dp
+#sigma_w = 2*np.pi*laser_frequency*sigma_dp/2 # for fast longitudinal cooling
+
 sigma_t = 1/sigma_w # sec -- Fourier-limited laser pulse
 print('Laser pulse dration sigma_t = %.2f ps' % (sigma_t/1e-12))
 
@@ -94,7 +100,7 @@ GF_IP = xt.IonLaserIP(_buffer=buf,
                       laser_direction_nz = nz,
                       laser_energy         = 5e-3, # J
                       laser_duration_sigma = sigma_t, # sec
-                      laser_frequency = laser_frequency, # Hz
+                      laser_wavelength = lambda_l, # m
                       laser_waist_radius = 1.3e-3, # m
                       ion_excitation_energy = hw0, # eV
                       ion_excited_lifetime  = 76.6e-12, # sec
@@ -112,16 +118,19 @@ tracker = xt.Tracker(_context=context, _buffer=buf, sequence=sequence)
 # Get some particles #
 ######################
 
+sigma_x = 1.047e-3 # m
+sigma_y = 0.83e-3  # m
+
 particles = xt.Particles(_context=context,
                          mass0 = m_ion, # eV/c^2
-                         q0  = Z-Ne,
-                         p0c = p0c, # eV
-                         x=np.random.uniform(-1e-3, 1e-3, n_part),
-                         px=np.random.uniform(-1e-5, 1e-5, n_part),
-                         y=np.random.uniform(-1.5e-3, 1.5e-3, n_part),
-                         py=np.random.uniform(-3e-5, 3e-5, n_part),
-                         zeta=np.random.normal(scale=sigma_z, size=n_part),
-                         delta=np.random.normal(scale=sigma_dp, size=n_part),
+                         q0    = Z-Ne,
+                         p0c   = p0c, # eV
+                         x     = np.random.normal(scale=sigma_x, size=n_part),
+                         px    = np.random.normal(scale=1e-5, size=n_part),
+                         y     = np.random.normal(scale=sigma_y, size=n_part),
+                         py    = np.random.normal(scale=1e-5, size=n_part),
+                         zeta  = np.random.normal(scale=sigma_z, size=n_part),
+                         delta = np.random.normal(scale=sigma_dp, size=n_part),
                          )
 
 #########
