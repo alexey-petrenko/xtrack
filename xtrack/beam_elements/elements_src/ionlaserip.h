@@ -27,6 +27,12 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     double const ion_excitation_energy = IonLaserIPData_get_ion_excitation_energy(el); // eV
     double const eV = 1.602176634e-19; // J
     
+    // constants for the Map_of_Excitation vs OmegaRabi and Detuning:
+    int64_t const N_OmegaRabiTau_values = IonLaserIPData_get_N_OmegaRabiTau_values(el);
+    int64_t const N_DeltaDetuningTau_values = IonLaserIPData_get_N_DeltaDetuningTau_values(el);
+    double  const OmegaRabiTau_max = IonLaserIPData_get_OmegaRabiTau_max(el);
+    double  const DeltaDetuningTau_max = IonLaserIPData_get_DeltaDetuningTau_max(el);
+    
     double const laser_Rayleigh_length = PI*w0*w0/laser_wavelength;
     //printf("\nlaser_Rayleigh_length=%e m\n",laser_Rayleigh_length); exit(1);
 
@@ -39,19 +45,9 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
     double const I0 = sqrt(2/PI)*(laser_energy/laser_sigma_t)/(PI*w0*w0); // W/m^2
     
     double state,delta,z,x,y,px,py,pc,gamma,beta,beta_x,beta_y,beta_z,vx,vy,vz,tcol;
-    double r2, Z_to_laser_focus, I, OmegaRabi, w;
+    double r2, Z_to_laser_focus, I, OmegaRabi, OmegaRabiTau, w;
 
     //start_per_particle_block (part0->part)
-            
-        // Map_of_Excitation_vs_Intensity_and_Detuning
-        double v0 = \
-            IonLaserIPData_get_Map_of_Excitation_vs_Intensity_and_Detuning(el, 0);
-        double v1 = \
-            IonLaserIPData_get_Map_of_Excitation_vs_Intensity_and_Detuning(el, 1);
-        double v2 = \
-            IonLaserIPData_get_Map_of_Excitation_vs_Intensity_and_Detuning(el, 999);
-        //printf("\n\nTest v0=%e, v1=%e, v2=%e\n\n",v0,v1,v2); exit(1);
-
     
         state = LocalParticle_get_state(part);
         delta = LocalParticle_get_delta(part);
@@ -100,12 +96,17 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
             (hbar*c/(ion_excitation_energy*eV)) * \
             sqrt(I*2*PI/(ion_excitation_energy*eV*ion_excited_lifetime)); // rad/sec
     
-        //printf("OmegaRabi*laser_sigma_t/(2*gamma) = %e\n",OmegaRabi*laser_sigma_t/(2*gamma)); exit(0);
+        OmegaRabiTau = OmegaRabi*laser_sigma_t/(2.0*gamma); // in the ion rest frame
     
         //Test:
         if (state > 0)
         {
-            if (OmegaRabi*laser_sigma_t/(2*gamma) > 1.5)
+            // Map_of_Excitation vs OmegaRabi and Detuning:
+            double v0 = IonLaserIPData_get_Map_of_Excitation(el, 0);
+            double v1 = IonLaserIPData_get_Map_of_Excitation(el, 1);
+            double v2 = IonLaserIPData_get_Map_of_Excitation(el, 999);
+            //printf("\n\nTest v0=%e, v1=%e, v2=%e\n\n",v0,v1,v2); exit(1);
+            if (OmegaRabiTau > 1.5)
             {
                 LocalParticle_set_state(part, 2);
             }

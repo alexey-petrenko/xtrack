@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import json
 import xobjects as xo
 from scipy.special import factorial
 
@@ -160,8 +161,6 @@ class SRotation(BeamElement):
 SRotation.XoStruct.extra_sources = [
         _pkg_root.joinpath('beam_elements/elements_src/srotation.h')]
 
-
-
 class IonLaserIP(BeamElement):
     '''Beam element modeling partially stripped ion excitation and emission of photons. Parameters:
                   Gaussian laser pulse is assumed (en.wikipedia.org/wiki/Gaussian_beam)
@@ -197,7 +196,11 @@ class IonLaserIP(BeamElement):
                'ion_excitation_g1':     xo.Float64,
                'ion_excitation_g2':     xo.Float64,
                'ion_excited_lifetime':  xo.Float64,
-               'Map_of_Excitation_vs_Intensity_and_Detuning': xo.Float64[100000],
+               'Map_of_Excitation':         xo.Float64[int(80*30)],
+               'N_OmegaRabiTau_values':     xo.Int64,
+               'N_DeltaDetuningTau_values': xo.Int64,
+               'OmegaRabiTau_max':          xo.Float64,
+               'DeltaDetuningTau_max':      xo.Float64,
               }
 
     def __init__(self,  laser_direction_nx =  0,
@@ -216,7 +219,6 @@ class IonLaserIP(BeamElement):
                         ion_excitation_g1 = 2,
                         ion_excitation_g2 = 2,
                         ion_excited_lifetime = 3.9e-17,
-                        Map_of_Excitation_vs_Intensity_and_Detuning = None,
                  **kwargs):
         super().__init__(**kwargs)
         self.laser_direction_nx    = laser_direction_nx
@@ -234,11 +236,16 @@ class IonLaserIP(BeamElement):
         self.ion_excitation_g1     = ion_excitation_g1
         self.ion_excitation_g2     = ion_excitation_g2
         self.ion_excited_lifetime  = ion_excited_lifetime
-        if Map_of_Excitation_vs_Intensity_and_Detuning is None:
-            self.Map_of_Excitation_vs_Intensity_and_Detuning = np.linspace(100, 200, 100000)
-        else:
-            self.Map_of_Excitation_vs_Intensity_and_Detuning = \
-            Map_of_Excitation_vs_Intensity_and_Detuning
+        
+        # Map of Excitation:
+        fname = _pkg_root.joinpath('beam_elements/IonLaserIP_data/map_of_excitation.json')
+        with open(fname, 'r') as f:
+            map_data = json.load(f)
+            self.Excitation = np.array(map_data['Excitation probability'])
+            self.N_OmegaRabiTau_values, self.N_DeltaDetuningTau_values = np.shape(self.Excitation)
+            self.OmegaRabiTau_max = map_data['OmegaRabi*tau_pulse max']
+            self.DeltaDetuningTau_max  = map_data['Delta_detuning*tau_pulse max']
+            self.Map_of_Excitation = self.Excitation.flatten()
 
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
