@@ -6,53 +6,53 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
 
     //The algorithm is partially from https://anaconda.org/petrenko/psi_beam_vs_laser
 
-    double const nx  = IonLaserIPData_get_laser_direction_nx(el);
-    double const ny  = IonLaserIPData_get_laser_direction_ny(el);
-    double const nz  = IonLaserIPData_get_laser_direction_nz(el);
+    double nx  = IonLaserIPData_get_laser_direction_nx(el);
+    double ny  = IonLaserIPData_get_laser_direction_ny(el);
+    double nz  = IonLaserIPData_get_laser_direction_nz(el);
     
-    double const laser_x = IonLaserIPData_get_laser_x(el);
-    double const laser_y = IonLaserIPData_get_laser_y(el);
-    double const laser_z = IonLaserIPData_get_laser_z(el);
-    double const w0 = IonLaserIPData_get_laser_waist_radius(el);
+    double laser_x = IonLaserIPData_get_laser_x(el);
+    double laser_y = IonLaserIPData_get_laser_y(el);
+    double laser_z = IonLaserIPData_get_laser_z(el);
+    double w0 = IonLaserIPData_get_laser_waist_radius(el);
 
-    double const laser_energy = IonLaserIPData_get_laser_energy(el);
-    double const laser_waist_shift = IonLaserIPData_get_laser_waist_shift(el);
+    double laser_energy = IonLaserIPData_get_laser_energy(el);
+    double laser_waist_shift = IonLaserIPData_get_laser_waist_shift(el);
 
-    double const laser_sigma_t = IonLaserIPData_get_laser_duration_sigma(el);
-    //double const laser_sigma_w = 1/laser_sigma_t; // rad/sec -- assuming Fourier-limited pulse
+    double laser_sigma_t = IonLaserIPData_get_laser_duration_sigma(el);
+    //double laser_sigma_w = 1/laser_sigma_t; // rad/sec -- assuming Fourier-limited pulse
 
-    double const laser_wavelength = IonLaserIPData_get_laser_wavelength(el); // Hz
-    double const c = 299792458.0; // m/s
+    double laser_wavelength = IonLaserIPData_get_laser_wavelength(el); // Hz
+    double c = 299792458.0; // m/s
 
-    double const ion_excited_lifetime = IonLaserIPData_get_ion_excited_lifetime(el); // sec
-    double const ion_excitation_energy = IonLaserIPData_get_ion_excitation_energy(el); // eV
-    double const eV = 1.602176634e-19; // J
+    double ion_excited_lifetime = IonLaserIPData_get_ion_excited_lifetime(el); // sec
+    double ion_excitation_energy = IonLaserIPData_get_ion_excitation_energy(el); // eV
+    double eV = 1.602176634e-19; // J
     
     // constants for the Map_of_Excitation vs OmegaRabi and Detuning:
-    int64_t const N_OmegaRabiTau_values = IonLaserIPData_get_N_OmegaRabiTau_values(el);
-    int64_t const N_DeltaDetuningTau_values = IonLaserIPData_get_N_DeltaDetuningTau_values(el);
-    double  const OmegaRabiTau_max = IonLaserIPData_get_OmegaRabiTau_max(el);
-    double  const DeltaDetuningTau_max = IonLaserIPData_get_DeltaDetuningTau_max(el);
-    double  const dOmegaRabiTau = OmegaRabiTau_max/(N_OmegaRabiTau_values-1.0);
-    double  const dDeltaDetuningTau = DeltaDetuningTau_max/(N_DeltaDetuningTau_values-1.0);
+    int64_t N_OmegaRabiTau_values = IonLaserIPData_get_N_OmegaRabiTau_values(el);
+    int64_t N_DeltaDetuningTau_values = IonLaserIPData_get_N_DeltaDetuningTau_values(el);
+    double  OmegaRabiTau_max = IonLaserIPData_get_OmegaRabiTau_max(el);
+    double  DeltaDetuningTau_max = IonLaserIPData_get_DeltaDetuningTau_max(el);
+    double  dOmegaRabiTau = OmegaRabiTau_max/(N_OmegaRabiTau_values-1.0);
+    double  dDeltaDetuningTau = DeltaDetuningTau_max/(N_DeltaDetuningTau_values-1.0);
     
-    double const laser_Rayleigh_length = PI*w0*w0/laser_wavelength;
+    double laser_Rayleigh_length = PI*w0*w0/laser_wavelength;
     //printf("\nlaser_Rayleigh_length=%e m\n",laser_Rayleigh_length); exit(1);
 
-    double const p0c = LocalParticle_get_p0c(part0); // eV
-    double const m0  = LocalParticle_get_mass0(part0); // eV/c^2
+    double p0c = LocalParticle_get_p0c(part0); // eV
+    double m0  = LocalParticle_get_mass0(part0); // eV/c^2
     //printf("m0=%e,p0c=%e,p0c/m0=%f\n",m0,p0c,p0c/m0);
-    double const hbar = 1.054571817e-34; // J*sec
+    double hbar = 1.054571817e-34; // J*sec
     
     
-    //double const gamma0 = sqrt(1.0 + p0c*p0c/(m0*m0));
-    //double const beta0  = sqrt(1.0 - 1.0/(gamma0*gamma0));
-    double const OmegaTransition = ion_excitation_energy*eV/hbar; // rad/sec
+    //double gamma0 = sqrt(1.0 + p0c*p0c/(m0*m0));
+    //double beta0  = sqrt(1.0 - 1.0/(gamma0*gamma0));
+    double OmegaTransition = ion_excitation_energy*eV/hbar; // rad/sec
     //printf("2.0*PI*c/OmegaTransition = %e m, laser_wavelength=%e m\n",
     //        2.0*PI*c/OmegaTransition, laser_wavelength/((1.0+beta0)*gamma0)); exit(0);
 
     // Maximum laser intensity (at the focal point)
-    double const I0 = sqrt(2/PI)*(laser_energy/laser_sigma_t)/(PI*w0*w0); // W/m^2
+    double I0 = sqrt(2/PI)*(laser_energy/laser_sigma_t)/(PI*w0*w0); // W/m^2
     
     double state,delta,z,x,y,px,py,pc,gamma,beta,beta_x,beta_y,beta_z,vx,vy,vz,tcol;
     double r2, Z_to_laser_focus, I, OmegaRabi, OmegaRabiTau, DeltaDetuningTau, w;

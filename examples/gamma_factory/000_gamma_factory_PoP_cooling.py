@@ -103,7 +103,7 @@ lambda_0 = 2*np.pi*hc/hw0 # m -- ion excitation wavelength
 
 lambda_l = lambda_0*gamma*(1 + beta*np.cos(theta_l)) # m -- laser wavelength
 # Shift laser wavelength for fast longitudinal cooling:
-#lambda_l = lambda_l*(1+sigma_dp) # m
+lambda_l = lambda_l*(1+sigma_dp) # m
 
 laser_frequency = c/lambda_l # Hz
 sigma_w = 2*np.pi*laser_frequency*sigma_dp
