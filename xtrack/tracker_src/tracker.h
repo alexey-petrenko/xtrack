@@ -19,7 +19,7 @@ void global_aperture_check(LocalParticle* part0){
 
 	// I assume that if I am in the function is because
     	if (!is_alive){
-           LocalParticle_set_state(part, 0);
+           LocalParticle_set_state(part, -1);
 	}
     //end_per_particle_block
 
@@ -38,11 +38,14 @@ void increment_at_element(LocalParticle* part0){
 }
 
 /*gpufun*/
-void increment_at_turn(LocalParticle* part0){
+void increment_at_turn(LocalParticle* part0, int flag_reset_s){
 
     //start_per_particle_block (part0->part)
 	LocalParticle_add_to_at_turn(part, 1);
 	LocalParticle_set_at_element(part, 0);
+    if (flag_reset_s>0){
+        LocalParticle_set_s(part, 0.);
+    }
     //end_per_particle_block
 }
 
@@ -60,8 +63,8 @@ int64_t check_is_active(LocalParticle* part) {
         if (part->state[ipart]<1){
             LocalParticle_exchange(
                 part, ipart, part->_num_active_particles-1);
-            part->_num_active_particles--; 
-            part->_num_lost_particles++; 
+            part->_num_active_particles--;
+            part->_num_lost_particles++;
         }
 	else{
 	    ipart++;

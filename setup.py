@@ -6,14 +6,13 @@ from setuptools import setup, find_packages, Extension
 
 extensions = []
 
-
 #########
 # Setup #
 #########
 
 setup(
     name='xtrack',
-    version='0.3.2',
+    version='0.13.0',
     description='Tracking library for particle accelerators',
     url='https://github.com/xsuite/xtrack',
     author='Riccard De Maria, Giovanni Iadarola',
@@ -23,7 +22,8 @@ setup(
     install_requires=[
         'numpy>=1.0',
         'scipy',
-        'xobjects>=0.0.8',
-        'xline'
+        'xobjects',
+        'xpart',
+        'xdeps'
         ]
     )

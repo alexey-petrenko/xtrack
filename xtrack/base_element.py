@@ -1,9 +1,11 @@
 from pathlib import Path
+import numpy as np
 
 import xobjects as xo
-from .particles import ParticlesData, gen_local_particle_api
-from .dress import dress
+import xpart as xp
+
 from .general import _pkg_root
+from .interal_record import RecordIdentifier, RecordIndex, generate_get_record
 
 start_per_part_block = """
    int64_t const n_part = LocalParticle_get__num_active_particles(part0); //only_for_context cpu_serial cpu_openmp
@@ -55,7 +57,7 @@ def _handle_per_particle_blocks(sources):
 
 def dress_element(XoElementData):
 
-    DressedElement = dress(XoElementData)
+    DressedElement = xo.dress(XoElementData)
     assert XoElementData.__name__.endswith('Data')
     name = XoElementData.__name__[:-4]
 
@@ -65,8 +67,12 @@ def dress_element(XoElementData):
             f'void {name}_track_particles(\n'
             f'               {name}Data el,\n'
 '''
-                             ParticlesData particles){
+                             ParticlesData particles,
+                             int64_t flag_increment_at_element,
+                /*gpuglmem*/ int8_t* io_buffer){
             LocalParticle lpart;
+            lpart.io_buffer = io_buffer;
+
             int64_t part_id = 0;                    //only_for_context cpu_serial cpu_openmp
             int64_t part_id = blockDim.x * blockIdx.x + threadIdx.x; //only_for_context cuda
             int64_t part_id = get_global_id(0);                    //only_for_context opencl
@@ -79,7 +85,7 @@ def dress_element(XoElementData):
             f'      {name}_track_local_particle(el, &lpart);\n'
 '''
                 }
-                if (check_is_active(&lpart)>0){
+                if (check_is_active(&lpart)>0 && flag_increment_at_element){
                         increment_at_element(&lpart);
                 }
             }
@@ -88,42 +94,62 @@ def dress_element(XoElementData):
     DressedElement._track_kernel_name = f'{name}_track_particles'
     DressedElement.track_kernel_description = {DressedElement._track_kernel_name:
         xo.Kernel(args=[xo.Arg(XoElementData, name='el'),
-                        xo.Arg(ParticlesData, name='particles')])}
+                        xo.Arg(xp.Particles.XoStruct, name='particles'),
+                        xo.Arg(xo.Int64, name='flag_increment_at_element'),
+                        xo.Arg(xo.Int8, pointer=True, name="io_buffer")])}
     DressedElement.iscollective = False
 
     def compile_track_kernel(self, save_source_as=None):
         context = self._buffer.context
 
-        sources=(
-                [gen_local_particle_api(),
-                _pkg_root.joinpath("tracker_src/tracker.h")]
-                + self.XoStruct.extra_sources
-                + [self.track_kernel_source])
+        sources = []
+
+        # Local particles
+        sources.append(xp.gen_local_particle_api())
+
+        # Tracker auxiliary functions
+        sources.append(_pkg_root.joinpath("tracker_src/tracker.h"))
+
+        # Internal recording
+        sources.append(RecordIdentifier._gen_c_api())
+        sources += RecordIdentifier.extra_sources
+        sources.append(RecordIndex._gen_c_api())
+        sources += RecordIndex.extra_sources
+
+        sources += self.XoStruct.extra_sources
+        sources.append(self.track_kernel_source)
 
         sources = _handle_per_particle_blocks(sources)
 
         context.add_kernels(sources=sources,
                 kernels=self.track_kernel_description,
-                 save_source_as=save_source_as)
+                save_source_as=save_source_as)
 
 
-    def track(self, particles):
+    def track(self, particles, increment_at_element=False):
 
+        context = self._buffer.context
         if not hasattr(self, '_track_kernel'):
-            context = self._buffer.context
             if self._track_kernel_name not in context.kernels.keys():
                 self.compile_track_kernel()
             self._track_kernel = context.kernels[self._track_kernel_name]
 
+        if hasattr(self, 'io_buffer') and self.io_buffer is not None:
+            io_buffer_arr = self.io_buffer.buffer
+        else:
+            io_buffer_arr=context.zeros(1, dtype=np.int8) # dummy
+
         self._track_kernel.description.n_threads = particles._capacity
-        self._track_kernel(el=self._xobject, particles=particles)
+        self._track_kernel(el=self._xobject, particles=particles,
+                           flag_increment_at_element=increment_at_element,
+                           io_buffer=io_buffer_arr)
 
     DressedElement.compile_track_kernel = compile_track_kernel
     DressedElement.track = track
 
     return DressedElement
 
-
+# TODO Duplicated code with xo.DressedStruct, can it be avoided?
 class MetaBeamElement(type):
 
     def __new__(cls, name, bases, data):
@@ -135,11 +161,32 @@ class MetaBeamElement(type):
                 if hasattr(bb,'_xofields'):
                     xofields = bb._xofields
                     break
+
+        if '_internal_record_class' in data.keys():
+            xofields['_internal_record_id'] = RecordIdentifier
+            if '_skip_in_to_dict' not in data.keys():
+                data['_skip_in_to_dict'] = []
+            data['_skip_in_to_dict'].append('_internal_record_id')
+
         XoStruct = type(XoStruct_name, (xo.Struct,), xofields)
 
         bases = (dress_element(XoStruct),) + bases
+        new_class = type.__new__(cls, name, bases, data)
 
-        return type.__new__(cls, name, bases, data)
+        XoStruct._DressingClass = new_class
+        XoStruct.extra_sources = []
+
+        if '_internal_record_class' in data.keys():
+            new_class.XoStruct._internal_record_class = data['_internal_record_class']
+            new_class._internal_record_class = data['_internal_record_class']
+            new_class.XoStruct.extra_sources.extend(
+                xo.context.sources_from_classes(xo.context.sort_classes(
+                                            [data['_internal_record_class'].XoStruct])))
+            new_class.XoStruct.extra_sources.append(
+                generate_get_record(ele_classname=XoStruct_name,
+                    record_classname=data['_internal_record_class'].XoStruct.__name__))
+
+        return new_class
 
 class BeamElement(metaclass=MetaBeamElement):
     _xofields={}

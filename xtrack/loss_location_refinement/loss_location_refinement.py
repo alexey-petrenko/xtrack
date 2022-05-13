@@ -1,43 +1,59 @@
 import numpy as np
 from scipy.spatial import ConvexHull
 
-import xtrack as xt
-import xline as xl
 import xobjects as xo
+import xpart as xp
+from ..tracker import Tracker
+from ..beam_elements import LimitPolygon, XYShift, SRotation, Drift
+from ..line import Line
 
 import logging
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
 
+_default_allowed_backtrack_types = [Drift, SRotation, XYShift]
+
 class LossLocationRefinement:
 
     def __init__(self, tracker, backtracker=None,
                  n_theta=None, r_max=None, dr=None, ds=None,
-                 save_refine_trackers=False):
+                 save_refine_trackers=False,
+                 allowed_backtrack_types=()):
 
-        self.tracker = tracker
+        allowed_backtrack_types = tuple(set(allowed_backtrack_types).union(
+                                        set(_default_allowed_backtrack_types)))
 
-        self._context = tracker.line._buffer.context
+        if tracker.iscollective:
+            self._original_tracker = tracker
+            self.tracker = tracker._supertracker
+        else:
+            self._original_tracker = tracker
+            self.tracker = tracker
+
+        self._context = self.tracker._line_frozen._buffer.context
         assert self._context.__class__ is xo.ContextCpu, (
                 "Other contexts are not supported!")
 
         # Build a polygon and compile the kernel
-        temp_poly = xt.LimitPolygon(_buffer=tracker.line._buffer,
+        temp_poly = LimitPolygon(_buffer=self.tracker._line_frozen._buffer,
                 x_vertices=[1,-1, -1, 1], y_vertices=[1,1,-1,-1])
         na = lambda a : np.array(a, dtype=np.float64)
         temp_poly.impact_point_and_normal(x_in=na([0]), y_in=na([0]), z_in=na([0]),
                                    x_out=na([2]), y_out=na([2]), z_out=na([0]))
 
         # Build track kernel with all elements + polygon
-        trk_gen = xt.Tracker(_buffer=tracker.line._buffer,
-                sequence=xl.Line(elements=tracker.line.elements + (temp_poly,)))
+        trk_gen = Tracker(_buffer=self.tracker._line_frozen._buffer,
+                line=Line(
+                    elements=self.tracker._line_frozen.elements + (temp_poly,)),
+                    global_xy_limit=tracker.global_xy_limit)
         self._trk_gen = trk_gen
 
         if backtracker is None:
-            backtracker = tracker.get_backtracker(_context=self._context)
+            backtracker = self.tracker.get_backtracker(_context=self._context,
+                                                       global_xy_limit=None)
         self.backtracker = backtracker
 
-        self.i_apertures, self.apertures = find_apertures(tracker)
+        self.i_apertures, self.apertures = find_apertures(self.tracker)
 
         self.save_refine_trackers = save_refine_trackers
         if save_refine_trackers:
@@ -47,6 +63,7 @@ class LossLocationRefinement:
         self.r_max = r_max
         self.dr = dr
         self.ds = ds
+        self.allowed_backtrack_types = allowed_backtrack_types
 
     def refine_loss_location(self, particles, i_apertures=None):
 
@@ -98,9 +115,11 @@ class LossLocationRefinement:
                                       self.n_theta, self.r_max, self.dr, self.ds,
                                       _trk_gen=self._trk_gen)
 
+                interp_tracker._original_tracker = self._original_tracker
                 part_refine = refine_loss_location_single_aperture(
-                            particles,i_aper_1, i_start_thin_0,
-                            self.backtracker, interp_tracker, inplace=True)
+                        particles,i_aper_1, i_start_thin_0,
+                        self.backtracker, interp_tracker, inplace=True,
+                        allowed_backtrack_types=self.allowed_backtrack_types)
 
                 if self.save_refine_trackers:
                     interp_tracker.i_start_thin_0 = i_start_thin_0
@@ -115,11 +134,11 @@ def check_for_active_shifts_and_rotations(tracker, i_aper_0, i_aper_1):
     presence_shifts_rotations = False
     for ii in range(i_aper_0, i_aper_1):
         ee = tracker.line.elements[ii]
-        if ee.__class__ is xt.SRotation:
+        if ee.__class__ is SRotation:
             if not np.isclose(ee.angle, 0, rtol=0, atol=1e-15):
                 presence_shifts_rotations = True
                 break
-        if ee.__class__ is xt.XYShift:
+        if ee.__class__ is XYShift:
             if not np.allclose([ee.dx, ee.dy], 0, rtol=0, atol=1e-15):
                 presence_shifts_rotations = True
                 break
@@ -151,22 +170,38 @@ def find_apertures(tracker):
     return i_apertures, apertures
 
 def refine_loss_location_single_aperture(particles, i_aper_1, i_start_thin_0,
-                                         backtracker, interp_tracker,
-                                         inplace=True):
+                    backtracker, interp_tracker,
+                    inplace=True,
+                    allowed_backtrack_types=_default_allowed_backtrack_types):
 
     mask_part = (particles.state == 0) & (particles.at_element == i_aper_1)
-    part_refine = xt.Particles(
+
+    part_refine = xp.Particles(
                     p0c=particles.p0c[mask_part],
+                    mass0=particles.mass0,
+                    q0=particles.q0,
                     x=particles.x[mask_part],
                     px=particles.px[mask_part],
                     y=particles.y[mask_part],
                     py=particles.py[mask_part],
                     zeta=particles.zeta[mask_part],
                     delta=particles.delta[mask_part],
-                    s=particles.s[mask_part])
+                    s=particles.s[mask_part],
+                    chi=particles.chi[mask_part],
+                    charge_ratio=particles.charge_ratio[mask_part])
     n_backtrack = i_aper_1 - (i_start_thin_0+1)
-    num_elements = len(backtracker.line.elements)
+    num_elements = len(backtracker.line.element_names)
     i_start_backtrack = num_elements-i_aper_1
+
+    # Check that we are not backtracking through element types that are not allowed
+    for nn in interp_tracker._original_tracker.line.element_names[
+                                             i_aper_1 - n_backtrack : i_aper_1]:
+        ee = interp_tracker._original_tracker.line.element_dict[nn]
+        if not isinstance(ee, tuple(allowed_backtrack_types)):
+            raise TypeError(
+                f'Cannot backtrack through element {nn} of type '
+                f'{ee.__class__.__name__}')
+
     backtracker.track(part_refine, ele_start=i_start_backtrack,
                       num_elements = n_backtrack)
     # Just for check
@@ -177,24 +212,25 @@ def refine_loss_location_single_aperture(particles, i_aper_1, i_start_thin_0,
     interp_tracker.track(part_refine)
     # There is a small fraction of particles that are not lost.
     # We verified that they are really at the edge. Their coordinates
-    # correspond to the end fo the short line, which is correct 
+    # correspond to the end fo the short line, which is correct
 
 
     if inplace:
         indx_sorted = np.argsort(part_refine.particle_id)
-        particles.x[mask_part] = part_refine.x[indx_sorted]
-        particles.px[mask_part] = part_refine.px[indx_sorted]
-        particles.y[mask_part] = part_refine.y[indx_sorted]
-        particles.py[mask_part] = part_refine.py[indx_sorted]
-        particles.zeta[mask_part] = part_refine.zeta[indx_sorted]
-        particles.s[mask_part] = part_refine.s[indx_sorted]
-        particles.delta[mask_part] = part_refine.delta[indx_sorted]
-        particles.psigma[mask_part] = part_refine.psigma[indx_sorted]
-        particles.rvv[mask_part] = part_refine.rvv[indx_sorted]
-        particles.rpp[mask_part] = part_refine.rpp[indx_sorted]
-        particles.p0c[mask_part] = part_refine.p0c[indx_sorted]
-        particles.gamma0[mask_part] = part_refine.gamma0[indx_sorted]
-        particles.beta0[mask_part] = part_refine.beta0[indx_sorted]
+        with particles._bypass_linked_vars():
+            particles.x[mask_part] = part_refine.x[indx_sorted]
+            particles.px[mask_part] = part_refine.px[indx_sorted]
+            particles.y[mask_part] = part_refine.y[indx_sorted]
+            particles.py[mask_part] = part_refine.py[indx_sorted]
+            particles.zeta[mask_part] = part_refine.zeta[indx_sorted]
+            particles.s[mask_part] = part_refine.s[indx_sorted]
+            particles.delta[mask_part] = part_refine.delta[indx_sorted]
+            particles.ptau[mask_part] = part_refine.ptau[indx_sorted]
+            particles.rvv[mask_part] = part_refine.rvv[indx_sorted]
+            particles.rpp[mask_part] = part_refine.rpp[indx_sorted]
+            particles.p0c[mask_part] = part_refine.p0c[indx_sorted]
+            particles.gamma0[mask_part] = part_refine.gamma0[indx_sorted]
+            particles.beta0[mask_part] = part_refine.beta0[indx_sorted]
 
     return part_refine
 
@@ -265,7 +301,7 @@ def interp_aperture_using_polygons(context, tracker, backtracker,
         i_hull = np.sort(hull.vertices)
         x_hull = x_non_convex[i_hull]
         y_hull = y_non_convex[i_hull]
-        interp_polygons.append(xt.LimitPolygon(
+        interp_polygons.append(LimitPolygon(
             _buffer=temp_buf,
             x_vertices=x_hull,
             y_vertices=y_hull))
@@ -283,10 +319,10 @@ def interp_aperture_using_polygons(context, tracker, backtracker,
 
 def generate_interp_aperture_locations(tracker, i_aper_0, i_aper_1, ds):
 
-    s0 = tracker.line.element_s_locations[i_aper_0]
-    s1 = tracker.line.element_s_locations[i_aper_1]
+    s0 = tracker._line_frozen.element_s_locations[i_aper_0]
+    s1 = tracker._line_frozen.element_s_locations[i_aper_1]
     assert s1>=s0
-    n_segments = int(np.ceil(s1-s0)/ds)
+    n_segments = int(np.ceil((s1-s0)/ds))
     if n_segments <= 1:
         s_vect = np.array([])
     else:
@@ -305,7 +341,7 @@ def build_interp_tracker(_buffer, s0, s1, s_interp, aper_0, aper_1, aper_interp,
         ee = tracker.line.elements[i_ele]
         if not ee.__class__.__name__.startswith('Drift'):
             assert not hasattr(ee, 'isthick') or not ee.isthick
-            ss_ee = tracker.line.element_s_locations[i_ele]
+            ss_ee = tracker._line_frozen.element_s_locations[i_ele]
             elements.append(ee.copy(_buffer=_buffer))
             s_elements.append(ss_ee)
     i_sorted = np.argsort(s_elements)
@@ -319,16 +355,18 @@ def build_interp_tracker(_buffer, s0, s1, s_interp, aper_0, aper_1, aper_interp,
         ss = s_sorted[ii]
 
         if ss-s_all[-1]>1e-14:
-            ele_all.append(xt.Drift(_buffer=_buffer, length=ss-s_all[-1]))
+            ele_all.append(Drift(_buffer=_buffer, length=ss-s_all[-1]))
             s_all.append(ss)
         ele_all.append(ele_sorted[ii])
         s_all.append(s_sorted[ii])
 
-    interp_tracker = xt.Tracker(
+    interp_tracker = Tracker(
             _buffer=_buffer,
-            sequence=xl.Line(elements=ele_all),
+            line=Line(elements=ele_all),
             track_kernel=_trk_gen.track_kernel,
-            element_classes=_trk_gen.element_classes)
+            element_classes=_trk_gen.element_classes,
+            reset_s_at_end_turn=0,
+            global_xy_limit=_trk_gen.global_xy_limit)
 
     return interp_tracker
 
@@ -380,7 +418,7 @@ def characterize_aperture(tracker, i_aperture, n_theta, r_max, dr,
 
         logger.info(f'{iteration=} num_part={x_test.shape[0]}')
 
-        ptest = xt.Particles(p0c=1,
+        ptest = xp.Particles(p0c=1,
                 x = x_test.copy(),
                 y = y_test.copy())
         tracker.track(ptest, ele_start=i_start, num_elements=num_elements)
@@ -410,7 +448,7 @@ def characterize_aperture(tracker, i_aperture, n_theta, r_max, dr,
     y_hull = y_non_convex[i_hull]
 
     # Get a convex polygon that does not have points for all angles
-    temp_poly = xt.LimitPolygon(x_vertices=x_hull, y_vertices=y_hull)
+    temp_poly = LimitPolygon(x_vertices=x_hull, y_vertices=y_hull)
 
     # Get a convex polygon that has vertices at all requested angles
     r_out = 1. # m
@@ -420,7 +458,7 @@ def characterize_aperture(tracker, i_aperture, n_theta, r_max, dr,
             y_out=r_out*np.sin(theta_vect),
             z_out=0*theta_vect)
 
-    polygon = xt.LimitPolygon(x_vertices=res[0], y_vertices=res[1],
+    polygon = LimitPolygon(x_vertices=res[0], y_vertices=res[1],
                               _buffer=buffer_for_poly)
 
     return polygon, i_start

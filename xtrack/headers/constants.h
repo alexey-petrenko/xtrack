@@ -1,3 +1,5 @@
+#ifndef XTRACK_CONSTANTS_H
+#define XTRACK_CONSTANTS_H
 
 #if !defined( C_LIGHT )
     #define   C_LIGHT ( 299792458.0 )
@@ -10,6 +12,10 @@
 #if !defined( PI )
     #define PI (3.1415926535897932384626433832795028841971693993751)
 #endif /* !defined( PI ) */
+
+#if !defined( MU_0 )
+    #define MU_0 (PI*4.0e-7)
+#endif /* !defined( MU_0 ) */
 
 #if !defined( DEG2RAD )
     #define DEG2RAD (0.0174532925199432957692369076848861271344287188854)
@@ -27,3 +33,4 @@
     #define QELEM (1.60217662e-19)
 #endif /* !defined( QELEM ) */
 
+#endif /* XTRACK_CONSTANTS_H */

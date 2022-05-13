@@ -4,86 +4,98 @@
 /*gpufun*/
 void Multipole_track_local_particle(MultipoleData el, LocalParticle* part0){
 
-   int64_t radiation_flag = MultipoleData_get_radiation_flag(el);
+    int64_t radiation_flag = MultipoleData_get_radiation_flag(el);
 
-   //start_per_particle_block (part0->part)
-    	int64_t order = MultipoleData_get_order(el);
-    	int64_t index_x = 2 * order;
-    	int64_t index_y = index_x + 1;
+    // Extract record and record_index
+    SynchrotronRadiationRecordData record = NULL;
+    RecordIndex record_index = NULL;
+    if (radiation_flag==2){
+        record = (SynchrotronRadiationRecordData) MultipoleData_getp_internal_record(el, part0);
+        if (record){
+            record_index = SynchrotronRadiationRecordData_getp__index(record);
+        }
+    }
 
-    	double dpx = MultipoleData_get_bal(el, index_x);
-    	double dpy = MultipoleData_get_bal(el, index_y);
+    //start_per_particle_block (part0->part)
+        int64_t order = MultipoleData_get_order(el);
+        int64_t index_x = 2 * order;
+        int64_t index_y = index_x + 1;
 
-    	double const x   = LocalParticle_get_x(part);
-    	double const y   = LocalParticle_get_y(part);
-    	double const chi = LocalParticle_get_chi(part);
+        double dpx = MultipoleData_get_bal(el, index_x);
+        double dpy = MultipoleData_get_bal(el, index_y);
 
-	double const hxl = MultipoleData_get_hxl(el);
-    	double const hyl = MultipoleData_get_hyl(el);
+        double const x   = LocalParticle_get_x(part);
+        double const y   = LocalParticle_get_y(part);
+        double const chi = LocalParticle_get_chi(part);
 
-    	while( index_x > 0 )
-    	{
-    	    double const zre = dpx * x - dpy * y;
-    	    double const zim = dpx * y + dpy * x;
+        double const hxl = MultipoleData_get_hxl(el);
+        double const hyl = MultipoleData_get_hyl(el);
 
-    	    index_x -= 2;
-    	    index_y -= 2;
+        while( index_x > 0 )
+        {
+            double const zre = dpx * x - dpy * y;
+            double const zim = dpx * y + dpy * x;
 
-    	    dpx = MultipoleData_get_bal(el, index_x) + zre;
-    	    dpy = MultipoleData_get_bal(el, index_y) + zim;
-    	}
+            index_x -= 2;
+            index_y -= 2;
 
-    	dpx = -chi * dpx; // rad
-    	dpy =  chi * dpy; // rad
+            dpx = MultipoleData_get_bal(el, index_x) + zre;
+            dpy = MultipoleData_get_bal(el, index_y) + zim;
+        }
 
-	// compute the average energy loss by synchrotron radiation
-	double const length = MultipoleData_get_length(el); // m
-        if (radiation_flag>0 && length!=0.0) {
-	  double const h = hypot(dpx, dpy) / length; // 1/m, 1/rho, curvature
-	  double const p0c = LocalParticle_get_p0c(part); // eV
-	  double const m0  = LocalParticle_get_mass0(part); // eV/c^2
-	  double const d = LocalParticle_get_delta(part);
-	  double const pc = p0c * (1 + d); // eV
-	  double const energy = hypot(m0, pc); // eV
-	  double const beta_gamma = pc / m0; // 
-	  double const q0 = LocalParticle_get_q0(part); // e
-	  // e^2 / 4 pi epsilon0 eV = (1 / 694461541.7756249) m
-	  double const classical_radius = q0*q0 / m0 / 694461541.7756249; // m, classical electromagnetic radius
-	  double const eloss = 2.0 / 3.0 * classical_radius*length * beta_gamma*beta_gamma*beta_gamma * h*h * energy; // eV
-	  
-	  // apply the energy kick
-	  LocalParticle_add_to_energy(part, -eloss);
 
-	  // A random number can be generated in this way
-	  //double r = LocalParticle_generate_random_double(part); 
+        double const length = MultipoleData_get_length(el); // m
+        double const curv = sqrt(dpx*dpx + dpy*dpy) / length;
 
-	}
-	
-    	if( ( hxl > 0) || ( hyl > 0) || ( hxl < 0 ) || ( hyl < 0 ) )
-    	{
-    	    double const delta  = LocalParticle_get_delta(part);
+        // Radiation at entrance
+        if (radiation_flag > 0 && length > 0){
+            double const L_path = 0.5*length*(1 + (hxl*x - hyl*y)/length); //CHECK!!!!
+            if (radiation_flag == 1){
+                synrad_average_kick(part, curv, L_path);
+            }
+            else if (radiation_flag == 2){
+                synrad_emit_photons(part, curv, L_path, record_index, record);
+            }
+        }
 
-    	    double const hxlx   = x * hxl;
-    	    double const hyly   = y * hyl;
+        dpx = -chi * dpx; // rad
+        dpy =  chi * dpy; // rad
 
-    	    LocalParticle_add_to_zeta(part, chi * ( hyly - hxlx ) );
+        if( ( hxl > 0) || ( hyl > 0) || ( hxl < 0 ) || ( hyl < 0 ) )
+        {
+            double const delta  = LocalParticle_get_delta(part);
 
-    	    dpx += hxl + hxl * delta;
-    	    dpy -= hyl + hyl * delta;
+            double const hxlx   = x * hxl;
+            double const hyly   = y * hyl;
 
-    	    if( length > 0 || length < 0)
-    	    {
-    	        double const b1l = chi * MultipoleData_get_bal(el, 0 );
-    	        double const a1l = chi * MultipoleData_get_bal(el, 1 );
+            LocalParticle_add_to_zeta(part, chi * ( hyly - hxlx ) );
 
-    	        dpx -= b1l * hxlx / length;
-    	        dpy += a1l * hyly / length;
-    	    }
-    	}
+            dpx += hxl + hxl * delta;
+            dpy -= hyl + hyl * delta;
 
-    	LocalParticle_add_to_px(part, dpx );
-    	LocalParticle_add_to_py(part, dpy );
+            if( length != 0)
+            {
+                double const b1l = chi * MultipoleData_get_bal(el, 0 );
+                double const a1l = chi * MultipoleData_get_bal(el, 1 );
 
+                dpx -= b1l * hxlx / length;
+                dpy += a1l * hyly / length;
+            }
+        }
+
+        LocalParticle_add_to_px(part, dpx);
+        LocalParticle_add_to_py(part, dpy);
+
+        // Radiation at exit
+        if (radiation_flag > 0 && length > 0){
+            double const L_path = 0.5*length*(1 + (hxl*x - hyl*y)/length); //CHECK!!!!
+            if (radiation_flag == 1){
+                synrad_average_kick(part, curv, L_path);
+            }
+            else if (radiation_flag == 2){
+                synrad_emit_photons(part, curv, L_path, record_index, record);
+            }
+        }
     //end_per_particle_block
 }
 

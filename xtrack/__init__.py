@@ -1,17 +1,25 @@
 from .general import _pkg_root
 
-from .dress import dress
 from .base_element import dress_element, BeamElement
 from .beam_elements import *
+from .line_frozen import LineFrozen
 from .line import Line
-from .particles import Particles
 from .tracker import Tracker
 from .loss_location_refinement import LossLocationRefinement
+from .interal_record import (RecordIdentifier, RecordIndex, new_io_buffer,
+                             start_internal_logging, stop_internal_logging)
 
 from .monitors import generate_monitor_class
-ParticlesMonitor = generate_monitor_class(Particles)
+from . import linear_normal_form
 
-def enable_pyheadtail_interface():
-    import xtrack.pyheadtail_interface.pyhtxtparticles as pp
-    import xtrack as xt
-    xt.Particles = pp.PyHtXtParticles
+import xpart as _xp
+ParticlesMonitor = generate_monitor_class(_xp.Particles)
+
+def Particles(*args, **kwargs):
+    raise ValueError(
+    "`xtrack.Particles` not available anymore, please use `xpart.Particles`")
+
+def enable_pyheadtail_interface(*args, **kwargs):
+    raise ValueError(
+    "\n`xtrack.enable_pyheadtail_interface` not available anymore,"
+    "\nplease use `xpart.enable_pyheadtail_interface`")

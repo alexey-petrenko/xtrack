@@ -5,7 +5,7 @@ import numpy as np
 
 import xobjects as xo
 import xtrack as xt
-import xline as xl
+import xpart as xp
 
 from make_short_line import make_short_line
 
@@ -36,30 +36,32 @@ elif str(fname_line_particles).endswith('.json'):
     with open(fname_line_particles, 'r') as fid:
         input_data = json.load(fid)
 
-##################
-# Get a sequence #
-##################
+##############
+# Get a line #
+##############
 
-sequence = xl.Line.from_dict(input_data['line'])
+line = xt.Line.from_dict(input_data['line'])
 if short_test:
-    sequence = make_short_line(sequence)
+    line = make_short_line(line)
 
 #################
 # Build Tracker #
 #################
 print('Build tracker...')
-freeze_vars = xt.particles.part_energy_varnames() + ['zeta']
+freeze_vars = xp.particles.part_energy_varnames() + ['zeta']
 tracker = xt.Tracker(_context=context,
-            sequence=sequence,
-            local_particle_src=xt.particles.gen_local_particle_api(
+            line=line,
+            local_particle_src=xp.gen_local_particle_api(
                                                 freeze_vars=freeze_vars),
             )
 
 ######################
 # Get some particles #
 ######################
-input_data['particle']['x'] += np.linspace(-1e-4, 1e-4, 10)
-particles = xt.Particles(_context=context, **input_data['particle'])
+part0 = xp.Particles(_context=context, **input_data['particle'])
+particles = xp.build_particles(_context=context,
+        x=np.linspace(-1e-4, 1e-4, 10), particle_ref=part0)
+
 
 particles_before_tracking = particles.copy()
 
@@ -70,7 +72,7 @@ print('Track a few turns...')
 n_turns = 10
 tracker.track(particles, num_turns=n_turns)
 
-for vv in ['psigma', 'delta', 'rpp', 'rvv', 'zeta']:
+for vv in ['ptau', 'delta', 'rpp', 'rvv', 'zeta']:
     vv_before = context.nparray_from_context_array(
                         getattr(particles_before_tracking, vv))
     vv_after= context.nparray_from_context_array(

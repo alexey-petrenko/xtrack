@@ -1,6 +1,8 @@
-import xobjects as xo
+import numpy as np
 
-from ..particles import Particles
+import xobjects as xo
+import xpart as xp
+
 
 class BeamInteraction:
     def __init__(self, name=None, interaction_process=None,
@@ -29,9 +31,11 @@ class BeamInteraction:
         if products is None or products['x'].size == 0:
             particles.reorganize()
         else:
-            new_particles = Particles(_context=particles._buffer.context,
+            new_particles = xp.Particles(_context=particles._buffer.context,
                     p0c = particles.p0c[0], # TODO: Should we check that 
                                             #       they are all the same?
+                    mass0 = particles.mass0,
+                    q0 = particles.q0,
                     s = products['s'],
                     x = products['x'],
                     px = products['px'],
@@ -41,6 +45,8 @@ class BeamInteraction:
                     delta = products['delta'],
                     mass_ratio = products['mass_ratio'],
                     charge_ratio = products['charge_ratio'],
+                    at_element = products['at_element'],
+                    at_turn = products['at_turn'],
                     parent_particle_id = products['parent_particle_id'])
 
             particles.add_particles(new_particles)
