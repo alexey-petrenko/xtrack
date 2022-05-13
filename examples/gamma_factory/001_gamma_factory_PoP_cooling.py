@@ -3,8 +3,8 @@ import numpy as np
 
 import time
 import xobjects as xo
-import xline as xl
 import xtrack as xt
+import xpart as xp
 
 # MPI:
 from mpi4py import MPI
@@ -12,6 +12,7 @@ from mpi4py import MPI
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
+
 
 num_turns = int(1e6)
 n_part = 300
@@ -43,7 +44,7 @@ M = xt.LinearTransferMatrix(_buffer=buf, _context=context,
             Q_s=0.0131,
             beta_s=sigma_z/sigma_dp)
 
-sequence = xl.Line(
+sequence = xt.Line(
     elements=[M],
     element_names=['LinearTransferMatrix']
 )
@@ -131,13 +132,13 @@ sequence.append_element(GF_IP, 'GammaFactory_IP')
 # Build TrackJob #
 ##################
 
-tracker = xt.Tracker(_context=context, _buffer=buf, sequence=sequence)
+tracker = xt.Tracker(_context=context, _buffer=buf, line=sequence)
 
 ######################
 # Get some particles #
 ######################
 
-particles = xt.Particles(_context=context,
+particles = xp.Particles(_context=context,
                          mass0 = m_ion, # eV/c^2
                          q0    = Z-Ne,
                          p0c   = p0c, # eV

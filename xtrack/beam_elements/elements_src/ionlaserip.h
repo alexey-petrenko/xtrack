@@ -156,7 +156,7 @@ void IonLaserIP_track_local_particle(IonLaserIPData el, LocalParticle* part0){
                     // photon recoil (from emitted photon!):
                     rnd = (float)rand()/(float)(RAND_MAX);
                     LocalParticle_add_to_energy(part,
-                                                -ion_excitation_energy*rnd*2.0*gamma); // eV
+                                                -ion_excitation_energy*rnd*2.0*gamma, 0); // eV
                 } else {
                     LocalParticle_set_state(part, 1); // Still particle
                 }

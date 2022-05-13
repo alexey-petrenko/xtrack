@@ -3,8 +3,8 @@ import numpy as np
 
 import time
 import xobjects as xo
-import xline as xl
 import xtrack as xt
+import xpart as xp
 
 # MPI:
 from mpi4py import MPI
@@ -12,6 +12,7 @@ from mpi4py import MPI
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
+
 
 num_turns = int(400000)
 n_part = 1000
@@ -51,16 +52,20 @@ buf = context.new_buffer()
 fname_sequence = '../../test_data/sps_w_spacecharge/line_no_spacecharge_and_particle.json'
 with open(fname_sequence, 'r') as fid:
      input_data = json.load(fid)
-sequence = xl.Line.from_dict(input_data['line'])
+sequence = xt.Line.from_dict(input_data['line'])
 
-items, names = sequence.get_elements_of_type(xl.Cavity)
+items, names = sequence.get_elements_of_type(xt.Cavity)
+cav = None
 for itm, name in zip(items, names):
     print(name + ':\t' + str(itm))
-    
+    if name == 'acta.31637':
+        cav = itm
+
 # Modify voltage:
-name = 'acta.31637'
-idx = sequence.find_element_ids(name)[0]
-cav = sequence.elements[idx]
+#name = 'acta.31637'
+#idx = sequence.find_element_ids(name)[0]
+#cav = sequence.elements[idx]
+
 cav.voltage = 7e6 # V
 
 
@@ -128,13 +133,13 @@ sequence.append_element(GF_IP, 'GammaFactory_IP')
 # Build TrackJob #
 ##################
 
-tracker = xt.Tracker(_context=context, _buffer=buf, sequence=sequence)
+tracker = xt.Tracker(_context=context, _buffer=buf, line=sequence)
 
 ######################
 # Get some particles #
 ######################
 
-particles = xt.Particles(_context=context,
+particles = xp.Particles(_context=context,
                          mass0 = m_ion, # eV/c^2
                          q0    = Z-Ne,
                          p0c   = p0c, # eV

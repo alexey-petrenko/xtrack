@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import factorial
 
+import json
 import xobjects as xo
 import xpart as xp
 
