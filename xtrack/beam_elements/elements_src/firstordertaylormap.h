@@ -1,3 +1,8 @@
+// copyright ############################### //
+// This file is part of the Xtrack Package.  //
+// Copyright (c) CERN, 2021.                 //
+// ######################################### //
+
 #ifndef XTRACK_FIRSTORDERTAYLORMAP_H
 #define XTRACK_FIRSTORDERTAYLORMAP_H
 
@@ -7,6 +12,7 @@ void FirstOrderTaylorMap_track_local_particle(FirstOrderTaylorMapData el, LocalP
     int64_t const radiation_flag = FirstOrderTaylorMapData_get_radiation_flag(el);
     double const length = FirstOrderTaylorMapData_get_length(el); // m
 
+    double dpx_record, dpy_record, dp_record;
     //start_per_particle_block (part0->part)
 
         double x0 = LocalParticle_get_x(part);
@@ -14,8 +20,7 @@ void FirstOrderTaylorMap_track_local_particle(FirstOrderTaylorMapData el, LocalP
         double y0 = LocalParticle_get_y(part);
         double py0 = LocalParticle_get_py(part);
         double beta0 = LocalParticle_get_beta0(part);
-        double beta = LocalParticle_get_rvv(part)*beta0;
-        double tau0 = LocalParticle_get_zeta(part)/beta;
+        double tau0 = LocalParticle_get_zeta(part)/beta0;
         double ptau0 = LocalParticle_get_ptau(part);
 
         LocalParticle_set_x(part,FirstOrderTaylorMapData_get_m0(el,0) +
@@ -61,9 +66,8 @@ void FirstOrderTaylorMap_track_local_particle(FirstOrderTaylorMapData el, LocalP
                             FirstOrderTaylorMapData_get_m1(el,5,4)*tau0 +
                             FirstOrderTaylorMapData_get_m1(el,5,5)*ptau0;
 
-        LocalParticle_update_delta(part,sqrt(ptau*ptau + 2.0*ptau/beta0+1.0)-1.0);
-        beta = LocalParticle_get_rvv(part)*beta0;
-        LocalParticle_set_zeta(part,tau*beta);
+        LocalParticle_update_ptau(part, ptau);
+        LocalParticle_set_zeta(part,tau*beta0);
 
         // Radiation
         if (radiation_flag > 0 && length > 0){
@@ -71,7 +75,8 @@ void FirstOrderTaylorMap_track_local_particle(FirstOrderTaylorMapData el, LocalP
             double dpy = LocalParticle_get_py(part)-py0;
             double curv = sqrt(dpx*dpx+dpy*dpy);
             if (radiation_flag == 1){
-                synrad_average_kick(part, curv, length);
+                synrad_average_kick(part, curv, length,
+                    &dp_record, &dpx_record, &dpy_record);
             }
             else if (radiation_flag == 2){
                 synrad_emit_photons(part, curv, length, NULL, NULL);

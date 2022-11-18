@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import pickle
 import json
 import pathlib
@@ -7,7 +12,6 @@ import xobjects as xo
 import xtrack as xt
 import xpart as xp
 
-from make_short_line import make_short_line
 
 short_test = False # Short line (5 elements)
 
@@ -22,27 +26,22 @@ fname_line_particles = test_data_folder.joinpath(
 ####################
 
 context = xo.ContextCpu()
-context = xo.ContextCupy()
-context = xo.ContextPyopencl('0.0')
+#context = xo.ContextCupy()
+#context = xo.ContextPyopencl('0.0')
 
 #############
 # Load file #
 #############
 
-if str(fname_line_particles).endswith('.pkl'):
-    with open(fname_line_particles, 'rb') as fid:
-        input_data = pickle.load(fid)
-elif str(fname_line_particles).endswith('.json'):
-    with open(fname_line_particles, 'r') as fid:
-        input_data = json.load(fid)
+with open(fname_line_particles, 'r') as fid:
+    input_data = json.load(fid)
 
 ##############
 # Get a line #
 ##############
 
 line = xt.Line.from_dict(input_data['line'])
-if short_test:
-    line = make_short_line(line)
+line.particle_ref = xp.Particles(**input_data['particle'])
 
 #################
 # Build Tracker #
@@ -50,18 +49,25 @@ if short_test:
 print('Build tracker...')
 freeze_vars = xp.particles.part_energy_varnames() + ['zeta']
 tracker = xt.Tracker(_context=context,
-            line=line,
-            local_particle_src=xp.gen_local_particle_api(
-                                                freeze_vars=freeze_vars),
-            )
+            line=line)
 
-######################
-# Get some particles #
-######################
-part0 = xp.Particles(_context=context, **input_data['particle'])
-particles = xp.build_particles(_context=context,
-        x=np.linspace(-1e-4, 1e-4, 10), particle_ref=part0)
+tracker.freeze_longitudinal()
 
+#########
+# Twiss #
+#########
+
+tw = tracker.twiss(method='4d')  # <-- Need to choose 4d mode when longitudinal
+                                 #     variables are frozen
+
+##################################
+# Match a particles distribution #
+##################################
+
+particles = xp.build_particles(_context=context, tracker=tracker,
+                               mode = '4d',  # <--- 4d
+                               x_norm=np.linspace(0, 10, 11),
+                               nemitt_x=3e-6, nemitt_y=3e-6)
 
 particles_before_tracking = particles.copy()
 
@@ -70,6 +76,9 @@ particles_before_tracking = particles.copy()
 #########
 print('Track a few turns...')
 n_turns = 10
+tracker.track(particles, num_turns=n_turns)
+
+print('Track again (no compile)')
 tracker.track(particles, num_turns=n_turns)
 
 for vv in ['ptau', 'delta', 'rpp', 'rvv', 'zeta']:

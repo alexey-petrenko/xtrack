@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 
 import xtrack as xt
@@ -7,7 +12,7 @@ import xobjects as xo
 # In this case the element internal record is made of two separate tables each
 # with its own record index.
 
-class Table1(xo.DressedStruct):
+class Table1(xo.HybridClass):
     _xofields = {
         '_index': xt.RecordIndex,
         'particle_x': xo.Float64[:],
@@ -17,7 +22,7 @@ class Table1(xo.DressedStruct):
         'particle_id': xo.Int64[:]
         }
 
-class Table2(xo.DressedStruct):
+class Table2(xo.HybridClass):
     _xofields = {
         '_index': xt.RecordIndex,
         'generated_rr': xo.Float64[:],
@@ -26,32 +31,16 @@ class Table2(xo.DressedStruct):
         'particle_id': xo.Int64[:]
         }
 
-class TestElementRecord(xo.DressedStruct):
+class TestElementRecord(xo.HybridClass):
     _xofields = {
-        'table1': Table1.XoStruct,
-        'table2': Table2.XoStruct
+        'table1': Table1,
+        'table2': Table2
         }
-
-# To allow elements of a given type to store data in a structure of the type defined
-# above we need to add in the element class an attribute called
-# `_internal_record_class` to which we bind the data structure type defined above.
-
-class TestElement(xt.BeamElement):
-    _xofields={
-        'n_kicks': xo.Int64,
-        }
-    _internal_record_class = TestElementRecord
-
-# The element uses the random number generator
-TestElement.XoStruct.extra_sources.extend([
-    xp._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
-    xp._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
-    ])
 
 # The two tables in the internal record can be accessed independently in the C
 # code of the beam element.
 
-TestElement.XoStruct.extra_sources.append(r'''
+TestElement_track_method_source = r'''
     /*gpufun*/
     void TestElement_track_local_particle(TestElementData el, LocalParticle* part0){
 
@@ -119,8 +108,24 @@ TestElement.XoStruct.extra_sources.append(r'''
 
         //end_per_particle_block
     }
-    ''')
+    '''
 
+# To allow elements of a given type to store data in a structure of the type defined
+# above we need to add in the element class an attribute called
+# `_internal_record_class` to which we bind the data structure type defined above.
+
+class TestElement(xt.BeamElement):
+    _xofields={
+        'n_kicks': xo.Int64,
+        }
+    _internal_record_class = TestElementRecord
+
+    _extra_c_sources = [
+        # The element uses the random number generator
+        xp._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        TestElement_track_method_source
+    ]
 
 # Once these steps are done, the TestElement and its recording feature are ready
 # and can be used as follows.
@@ -158,6 +163,8 @@ xt.stop_internal_logging(elements=[test_element1, test_element2])
 test_element1.track(part)
 test_element2.track(part)
 
+# The record can be accessed from test_element1.record and test_element2.record
+
 #!end-doc-part
 
 # Checks
@@ -185,8 +192,8 @@ for i_turn in range(num_turns0 + num_turns1):
     part.at_element[:] = 0
     part.at_turn += 1
 
-part._move_to(_context=xo.ContextCpu())
-record._move_to(_context=xo.ContextCpu())
+part.move(_context=xo.ContextCpu())
+record.move(_context=xo.ContextCpu())
 
 num_turns = num_turns0 + num_turns1
 num_particles = len(part.x)
@@ -253,8 +260,8 @@ for i_turn in range(num_turns0 + num_turns1):
     part.at_turn += 1
 
 
-part._move_to(_context=xo.ContextCpu())
-record._move_to(_context=xo.ContextCpu())
+part.move(_context=xo.ContextCpu())
+record.move(_context=xo.ContextCpu())
 
 num_turns = num_turns0
 
@@ -295,9 +302,9 @@ for i_turn in range(num_turns0 + num_turns1):
     part.at_element[:] = 0
     part.at_turn += 1
 
-part._move_to(_context=xo.ContextCpu())
-record0._move_to(_context=xo.ContextCpu())
-record1._move_to(_context=xo.ContextCpu())
+part.move(_context=xo.ContextCpu())
+record0.move(_context=xo.ContextCpu())
+record1.move(_context=xo.ContextCpu())
 
 num_turns = num_turns0 + num_turns1
 num_particles = len(part.x)

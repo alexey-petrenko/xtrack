@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import time
 import numpy as np
 
@@ -56,7 +61,7 @@ print('Build tracker ...')
 tracker = xt.Tracker(line=line, _context=context)
 tracker.matrix_stability_tol = 1e-2
 
-tracker.configure_radiation(mode='mean')
+tracker.configure_radiation(model='mean')
 
 # Twiss
 print('Checks with twiss...')
@@ -96,10 +101,9 @@ part_co = tw['particle_on_co']
 particles = xp.build_particles(tracker=tracker, _context=context,
     x_norm=[500., 0, 0], y_norm=[0, 0.0001, 0], zeta=part_co.zeta[0],
     delta=np.array([0,0,1e-2]) + part_co.delta[0],
-    scale_with_transverse_norm_emitt=(1e-9, 1e-9))
-#particles._init_random_number_generator(3*[4e9])
+    nemitt_x=1e-9, nemitt_y=1e-9)
 
-tracker.configure_radiation(mode='quantum')
+tracker.configure_radiation(model='quantum')
 
 print('Track 3 particles ...')
 num_turns = 5000
@@ -130,12 +134,12 @@ ax3.plot(part_co.delta[0]
 plt.show()
 
 # Switch radiation
-tracker.configure_radiation(mode='mean')
+tracker.configure_radiation(model='mean')
 par_for_emit = xp.build_particles(tracker=tracker, _context=context,
                                   x_norm=50*[0],
                                   zeta=part_co.zeta[0], delta=part_co.delta[0],
                                   )
-tracker.configure_radiation(mode='quantum')
+tracker.configure_radiation(model='quantum')
 
 num_turns=1500
 print('Track 50 particles...')

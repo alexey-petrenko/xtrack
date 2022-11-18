@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 import xtrack as xt
 import xobjects as xo
@@ -35,11 +40,31 @@ def test_constructor():
             nee = ee.__class__.from_dict(dd, _context=ctx)
             # Check that the two objects are bitwise identical
             if not isinstance(ctx, xo.ContextCpu):
-                ee._move_to(_context=xo.ContextCpu())
-                nee._move_to(_context=xo.ContextCpu())
+                ee.move(_context=xo.ContextCpu())
+                nee.move(_context=xo.ContextCpu())
             assert (ee._xobject._buffer.buffer[ee._xobject._offset:ee._xobject._size]
                     - nee._xobject._buffer.buffer[
                         nee._xobject._offset:nee._xobject._size]).sum() == 0
+
+def test_arr2ctx():
+
+    for ctx in xo.context.get_test_contexts():
+        print(f"Test {ctx.__class__}")
+
+        d = xt.Drift(_context=ctx)
+
+        a = [1., 2., 3.]
+        assert type(d._arr2ctx(a)) is ctx.nplike_array_type
+
+        a = ctx.zeros(shape=(20,), dtype=np.int64)
+        assert type(d._arr2ctx(a)) is ctx.nplike_array_type
+        assert (type(d._arr2ctx(a[1])) is int
+                or (type(d._arr2ctx(a[1])) is ctx.nplike_array_type
+                    and d._arr2ctx(a[1]).shape == ()))
+
+        a = np.array([1., 2., 3.])
+        assert type(d._arr2ctx(a)) is ctx.nplike_array_type
+        assert type(d._arr2ctx(a[1])) is float
 
 def test_drift():
 
@@ -52,7 +77,8 @@ def test_drift():
                 px=1e-5,
                 y=-2e-3,
                 py=-1.5e-5,
-                zeta=2.)
+                delta=1e-2,
+                zeta=1.)
 
         particles = xp.Particles.from_dict(dtk_particle.to_dict(),
                                            _context=ctx)
@@ -67,6 +93,9 @@ def test_drift():
                           dtk_particle.x, rtol=1e-14, atol=1e-14)
         assert np.isclose(ctx.nparray_from_context_array(particles.y)[0],
                           dtk_particle.y, rtol=1e-14, atol=1e-14)
+        assert np.isclose(ctx.nparray_from_context_array(particles.zeta)[0],
+                          dtk_particle.zeta,
+                          rtol=1e-14, atol=1e-14)
 
 
 
@@ -76,12 +105,12 @@ def test_elens():
         print(f"Test {ctx.__class__}")
 
         dtk_particle = dtk.TestParticles(
-                p0c=np.array([7000e9]),
-                x=np.array([1e-3]),
-                px=np.array([0.0]),
-                y=np.array([2.2e-3]),
-                py=np.array([0.0]),
-                zeta=np.array([0.]))
+                p0c  = np.array([7000e9]),
+                x    = np.array([1e-3]),
+                px   = np.array([0.0]),
+                y    = np.array([2.2e-3]),
+                py   = np.array([0.0]),
+                zeta = np.array([0.]))
 
         particles = xp.Particles.from_dict(dtk_particle.to_dict(),
                                            _context=ctx)
@@ -95,7 +124,8 @@ def test_elens():
 
         elens.track(particles)
 
-        dtk_elens = dtk.elements.Elens(inner_radius=1.1e-3,
+        dtk_elens = dtk.elements.Elens(
+                       inner_radius=1.1e-3,
                        outer_radius=2.2e-3,
                        elens_length=3.,
                        voltage=15e3,
@@ -104,9 +134,72 @@ def test_elens():
         dtk_elens.track(dtk_particle)
 
         assert np.isclose(ctx.nparray_from_context_array(particles.px)[0],
-                          dtk_particle.px, rtol=1e-9, atol=1e-9)
+                          dtk_particle.px, rtol=1e-2, atol=1e-2)
         assert np.isclose(ctx.nparray_from_context_array(particles.py)[0],
                           dtk_particle.py, rtol=1e-9, atol=1e-9)
+
+
+def test_elens_measured_radial():
+
+    for ctx in xo.context.get_test_contexts():
+        print(f"Test {ctx.__class__}")
+
+        def compute_coef(r_measured, j_measured, r_1_new, r_2_new,
+                         r_1_old, r_2_old, p_order = 13):
+            new_r = r_measured*(r_2_new-r_1_new)/(r_2_old-r_1_old)
+            new_j = j_measured*(r_2_old-r_1_old)/(r_2_new-r_1_new)
+
+            product = new_r*new_j
+
+            delta_r = new_r[2]-new_r[1]
+
+            numerator = [];
+            s = len(new_r)
+            for i in range(s):
+                numerator.append((delta_r*max(np.cumsum(product[0:i+1]))))
+            L = np.cumsum(product)
+            denominator = max(L)*delta_r
+            f_r = np.array(numerator/denominator)
+            r_selected = new_r[new_j != 0]
+            f_selected = f_r[new_j != 0]
+            coef = np.polyfit(r_selected, f_selected, p_order)
+            return coef
+
+
+        particle_ref = xp.Particles(
+                        p0c=np.array([7000e9]),
+                        x=np.array([1e-3]),
+                        px=np.array([0.0]),
+                        y=np.array([2.2e-3]),
+                        py=np.array([0.0]),
+                        zeta=np.array([0.]))
+        particle_test = particle_ref.copy(_context=ctx)
+
+        # polynomial fit parameters for constant radial density
+        r     = np.linspace(0.20338983,12,60)
+        j     = np.append(np.append(np.linspace(0,4,20)*0,
+               np.linspace(4,8,20)/np.linspace(4,8,20)), np.linspace(8,12,20)*0)
+        C     = compute_coef(r, j, 1.4, 2.8, 4.0, 8.0)
+
+        elens_radial_profile = xt.Elens(current=5, inner_radius=1.4e-3,
+                    outer_radius=2.8e-3, elens_length=3, voltage=10e3,
+                    coefficients_polynomial=C, _context=ctx)
+
+        elens_constant = xt.Elens(current=5, inner_radius=1.4e-3,
+                        outer_radius=2.8e-3, elens_length=3, voltage=10e3,
+                        )
+
+        elens_radial_profile.track(particle_test)
+        elens_constant.track(particle_ref)
+
+        particle_test.move(_context=xo.ContextCpu())
+
+        assert np.isclose(particle_test.px[0], particle_ref.px[0],
+                          rtol=1e-2, atol=1e-2)
+        assert np.isclose(particle_test.py[0], particle_ref.py[0],
+                          rtol=1e-2, atol=1e-2)
+
+
 
 
 def test_wire():
@@ -149,34 +242,6 @@ def test_wire():
         assert np.isclose(ctx.nparray_from_context_array(particles.py)[0],
                           dtk_particle.py, rtol=1e-9, atol=1e-9)
 
-def test_linked_arrays_in_multipole_and_rfmultipole():
-
-    for ctx in xo.context.get_test_contexts():
-        print(f"Test {ctx.__class__}")
-
-        mult = xt.Multipole(_context=ctx, knl=[1,2,3,4], ksl=[10, 20, 30, 40])
-        rfmult = xt.RFMultipole(_context=ctx, knl=[1,2,3,4], ksl=[10, 20, 30, 40],
-                                frequency=10.)
-        for m in [mult, rfmult]:
-            assert np.allclose(ctx.nparray_from_context_array(m.bal),
-                            [ 1., 10.,  2., 20.,  1.5 , 15.,
-                                0.66666667,  6.66666667], rtol=0, atol=1e-8)
-
-            m.knl[2:] = m.knl[2:] + 2
-            assert np.allclose(ctx.nparray_from_context_array(m.bal),
-                            [ 1., 10.,  2., 20.,  2.5 , 15.,
-                                1.,  6.66666667], rtol=0, atol=1e-8)
-
-            m.ksl[2:] = m.ksl[2:] + 20
-            assert np.allclose(ctx.nparray_from_context_array(m.bal),
-                            [ 1., 10.,  2., 20.,  2.5 , 25.,
-                                1.,  10.], rtol=0, atol=1e-8)
-
-            assert np.allclose(ctx.nparray_from_context_array(m.knl),
-                            [1, 2, 5, 6], rtol=0, atol=1e-12)
-
-            assert np.allclose(ctx.nparray_from_context_array(m.ksl),
-                               [10, 20, 50, 60], rtol=0, atol=1e-12)
 
 def test_linear_transfer():
     for ctx in xo.context.get_test_contexts():
@@ -507,9 +572,9 @@ def test_linear_transfer_uncorrelated_damping_equilibrium():
     for ctx in xo.context.get_test_contexts():
         print(f"Test {ctx.__class__}")
 
-        alpha_x_0 = -0.5
+        alpha_x_0 = 0.0
         beta_x_0 = 100.0
-        alpha_y_0 = -0.4
+        alpha_y_0 = 0.0
         beta_y_0 = 8.0
         Q_x = 0.18
         Q_y = 0.22
@@ -629,8 +694,8 @@ def test_cavity():
         delta = Pc/part.p0c - 1
         beta = Pc/part.energy
 
-        tau0 = part0.zeta/(part0.beta0 * part0.rvv)
-        tau = part.zeta/(part.beta0 * part.rvv)
+        tau0 = part0.zeta/(part0.beta0)
+        tau = part.zeta/(part.beta0)
 
         assert np.allclose(part.delta, delta, atol=1e-14, rtol=0)
         assert np.allclose(part.rpp, 1/(1+delta), atol=1e-14, rtol=0)
@@ -638,5 +703,70 @@ def test_cavity():
         assert np.allclose(tau, tau0, atol=1e-14, rtol=0)
         assert np.allclose((part.ptau - part0.ptau) * part0.p0c, 30, atol=1e-9, rtol=0)
 
+test_source = r"""
+/*gpufun*/
+void test_function(TestElementData el,
+                LocalParticle* part0,
+                /*gpuglmem*/ double* b){
+
+    double const a = TestElementData_get_a(el);
+
+    //start_per_particle_block (part0->part)
+
+        const int64_t ipart = part->ipart;
+        double const val = b[ipart];
+
+        LocalParticle_add_to_x(part, val + a);
+
+    //end_per_particle_block
+}
+
+/*gpufun*/
+void TestElement_track_local_particle(TestElementData el,
+                LocalParticle* part0){
+
+    double const a = TestElementData_get_a(el);
+
+    //start_per_particle_block (part0->part)
+
+        LocalParticle_set_x(part, a);
+
+    //end_per_particle_block
+}
+
+"""
+
+
+def test_per_particle_kernel():
+
+    for context in xo.context.get_test_contexts():
+        print(f"Test {context.__class__}")
+
+        class TestElement(xt.BeamElement):
+            _xofields={
+                'a': xo.Float64
+            }
+
+            _extra_c_sources=[test_source]
+
+            _per_particle_kernels={
+                'test_kernel': xo.Kernel(
+                    c_name='test_function',
+                    args=[
+                        xo.Arg(xo.Float64, pointer=True, name='b')
+                    ]),}
+
+        el = TestElement(_context=context, a=10)
+
+        # p = xp.Particles(p0c=1e9, x=[1,2,3], _context=context)
+        # el.track(p)
+        # p.move(_context=xo.ContextCpu())
+        # assert np.all(p.x == [10,10,10])
+
+        p = xp.Particles(p0c=1e9, x=[1,2,3], _context=context)
+        b = p.x*0.5
+        el.test_kernel(p, b=b)
+        p.move(_context=xo.ContextCpu())
+        assert np.all(p.x == np.array([11.5, 13, 14.5]))
 
 

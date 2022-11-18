@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import json
 import numpy as np
 
@@ -27,5 +32,6 @@ with open('line_and_particle.json', 'w') as fid:
     json.dump({
         'line': line.to_dict(),
         'particle': part0.to_dict()},
-        fid, cls=xo.JEncoder)
+        fid, cls=xo.JEncoder,
+        indent=4)
 

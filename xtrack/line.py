@@ -1,31 +1,36 @@
-import json
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import math
 import logging
 from copy import deepcopy
+from pprint import pp
 
 import numpy as np
 
 import xobjects as xo
 import xpart as xp
 
-from .loader_mad import madx_sequence_to_xtrack_line
-from .beam_elements import element_classes, Multipole
+from .mad_loader import MadLoader
+from .beam_elements import element_classes
 from . import beam_elements
 from .beam_elements import Drift
 
-log=logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 def mk_class_namespace(extra_classes):
     try:
         import xfields as xf
-        all_classes = element_classes + xf.element_classes + extra_classes
+        all_classes = element_classes + xf.element_classes + extra_classes + (Line,)
     except ImportError:
         all_classes = element_classes + extra_classes
         log.warning("Xfields not installed correctly")
 
-    out=AttrDict()
+    out = AttrDict()
     for cl in all_classes:
-        out[cl.__name__]=cl
+        out[cl.__name__] = cl
     return out
 
 
@@ -38,11 +43,7 @@ def _is_thick(element):
     return  ((hasattr(element, "isthick") and element.isthick) or
              (isinstance(element, _thick_element_types)))
 
-
-
-
-# missing access to particles._m:
-deg2rad = np.pi / 180.
+DEG2RAD = np.pi / 180.
 
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
@@ -50,24 +51,32 @@ class AttrDict(dict):
         self.__dict__ = self
 
 
-
 class Line:
 
     @classmethod
     def from_dict(cls, dct, _context=None, _buffer=None, classes=()):
-        class_dict=mk_class_namespace(classes)
+        class_dict = mk_class_namespace(classes)
 
-        _buffer, _ =xo.get_a_buffer(size=8,context=_context, buffer=_buffer)
-        elements = []
-        for el in dct["elements"]:
-            eltype = class_dict[el["__class__"]]
-            eldct=el.copy()
-            del eldct['__class__']
-            if hasattr(eltype,'XoStruct'):
-               newel = eltype.from_dict(eldct,_buffer=_buffer)
-            else:
-               newel = eltype.from_dict(eldct)
-            elements.append(newel)
+        _buffer = xo.get_a_buffer(context=_context, buffer=_buffer,size=8)
+
+        if isinstance(dct['elements'], dict):
+            elements = {}
+            num_elements = len(dct['elements'].keys())
+            for ii, (kk, ee) in enumerate(dct['elements'].items()):
+                if ii % 100 == 0:
+                    print('Loading line from dict: '
+                        f'{round(ii/num_elements*100):2d}%  ',end="\r", flush=True)
+                elements[kk] = _deserialize_element(ee, class_dict, _buffer)
+        elif isinstance(dct['elements'], list):
+            elements = []
+            num_elements = len(dct['elements'])
+            for ii, ee in enumerate(dct['elements']):
+                if ii % 100 == 0:
+                    print('Loading line from dict: '
+                        f'{round(ii/num_elements*100):2d}%  ',end="\r", flush=True)
+                elements.append(_deserialize_element(ee, class_dict, _buffer))
+        else:
+            raise ValueError('Field `elements` must be a dict or a list')
 
         self = cls(elements=elements, element_names=dct['element_names'])
 
@@ -76,19 +85,16 @@ class Line:
                                     _context=_buffer.context)
 
         if '_var_manager' in dct.keys():
-            self._init_var_management()
-            manager = self._var_management['manager']
-            for kk in self._var_management['data'].keys():
-                self._var_management['data'][kk].update(
-                                            dct['_var_management_data'][kk])
-            manager.load(dct['_var_manager'])
+            self._init_var_management(dct=dct)
+
+        print('Done loading line from dict.           ')
 
         return self
 
     @classmethod
     def from_sixinput(cls, sixinput, classes=()):
         log.warning("\n"
-            "WARNING: xtrack.Line.from_sixinput(sixinput) will be removed in furure versions.\n"
+            "WARNING: xtrack.Line.from_sixinput(sixinput) will be removed in future versions.\n"
             "Please use sixinput.generate_xtrack_line()\n")
         line = sixinput.generate_xtrack_line(classes=classes)
         return line
@@ -98,52 +104,67 @@ class Line:
         cls,
         sequence,
         classes=(),
-        ignored_madtypes=[],
+        ignored_madtypes=(),
         exact_drift=False,
-        drift_threshold=1e-6,
+#        drift_threshold=1e-6, # not used anymore with expanded sequences
         deferred_expressions=False,
         install_apertures=False,
         apply_madx_errors=False,
+        skip_markers=False,
+        merge_drifts=False,
+        merge_multipoles=False,
     ):
 
-        class_dict=mk_class_namespace(classes)
+        if not (exact_drift is False):
+            raise NotImplementedError("Exact drifts not implemented yet")
 
-        line = madx_sequence_to_xtrack_line(
-            sequence,
-            class_dict,
-            ignored_madtypes=ignored_madtypes,
-            exact_drift=exact_drift,
-            drift_threshold=drift_threshold,
-            install_apertures=install_apertures,
-            deferred_expressions=deferred_expressions)
+        class_namespace=mk_class_namespace(classes)
 
-        if apply_madx_errors:
-            line._apply_madx_errors(sequence)
-
+        loader = MadLoader(sequence,
+            classes=class_namespace,
+            ignore_madtypes=ignored_madtypes,
+            exact_drift=False,
+            enable_errors=apply_madx_errors,
+            enable_apertures=install_apertures,
+            enable_expressions=deferred_expressions,
+            skip_markers=skip_markers,
+            merge_drifts=merge_drifts,
+            merge_multipoles=merge_multipoles,
+            error_table=None,  # not implemented yet
+            )
+        line=loader.make_line()
         return line
 
-    def _init_var_management(self):
+    def _init_var_management(self, dct=None):
 
         from collections import defaultdict
         import xdeps as xd
 
         # Extract globals values from madx
-        _var_values = defaultdict(lambda :0)
+        _var_values = defaultdict(lambda: 0)
         _var_values.default_factory = None
 
-        _ref_manager = manager=xd.Manager()
-        _vref=manager.ref(_var_values,'vars')
-        _fref=manager.ref(mathfunctions,'f')
+        manager = xd.Manager()
+        _vref = manager.ref(_var_values, 'vars')
+        _fref = manager.ref(mathfunctions, 'f')
         _lref = manager.ref(self.element_dict, 'element_refs')
 
         self._var_management = {}
         self._var_management['data'] = {}
         self._var_management['data']['var_values'] = _var_values
 
-        self._var_management['manager'] = _ref_manager
+        self._var_management['manager'] = manager
         self._var_management['lref'] = _lref
         self._var_management['vref'] = _vref
         self._var_management['fref'] = _fref
+
+        if dct is not None:
+            manager = self._var_management['manager']
+            for kk in self._var_management['data'].keys():
+                self._var_management['data'][kk].update(
+                                            dct['_var_management_data'][kk])
+            manager.load(dct['_var_manager'])
+
 
     @property
     def vars(self):
@@ -156,14 +177,14 @@ class Line:
             return self._var_management['lref']
 
     def __init__(self, elements=(), element_names=None, particle_ref=None):
-        if isinstance(elements,dict):
-            element_dict=elements
+        if isinstance(elements, dict):
+            element_dict = elements
             if element_names is None:
-                raise ValueError('`element_names must be provided'
+                raise ValueError('`element_names` must be provided'
                                  ' if `elements` is a dictionary.')
         else:
             if element_names is None:
-                element_names = [ f"e{ii}" for ii in range(len(elements))]
+                element_names = [f"e{ii}" for ii in range(len(elements))]
             if len(element_names) > len(set(element_names)):
                 log.warning("Repetition found in `element_names` -> renaming")
                 old_element_names = element_names
@@ -171,7 +192,7 @@ class Line:
                 counters = {nn: 0 for nn in old_element_names}
                 for nn in old_element_names:
                     if counters[nn] > 0:
-                        new_nn = nn + '_'+  str(counters[nn])
+                        new_nn = nn + '_' + str(counters[nn])
                     else:
                         new_nn = nn
                     counters[nn] += 1
@@ -182,8 +203,8 @@ class Line:
             )
             element_dict = dict(zip(element_names, elements))
 
-        self.element_dict=element_dict.copy() # avoid modifications if user provided
-        self.element_names=list(element_names).copy()
+        self.element_dict = element_dict.copy()  # avoid modifications if user provided
+        self.element_names = list(element_names).copy()
 
         self.particle_ref = particle_ref
 
@@ -229,7 +250,7 @@ class Line:
                 new_elements.append(ee)
             else:
                 if _is_thick(ee) and not _is_drift(ee):
-                    new_elements.append(Drift(length==ee.length))
+                    new_elements.append(Drift(length=ee.length))
                 else:
                     new_elements.append(Drift(length=0))
 
@@ -245,7 +266,11 @@ class Line:
         if ((index_first_element is not None and name_first_element is not None)
                or (index_first_element is None and name_first_element is None)):
              raise ValueError(
-                "Plaese provide either `index_first_element` or `name_first_element`.")
+                "Please provide either `index_first_element` or `name_first_element`.")
+
+        if type(index_first_element) is str:
+            name_first_element = index_first_element
+            index_first_element = None
 
         if name_first_element is not None:
             assert self.element_names.count(name_first_element) == 1, (
@@ -253,31 +278,14 @@ class Line:
             )
             index_first_element = self.element_names.index(name_first_element)
 
-        new_elements = (list(self.elements[index_first_element:])
-                        + list(self.elements[:index_first_element]))
         new_element_names = (list(self.element_names[index_first_element:])
-                        + list(self.element_names[:index_first_element]))
+                             + list(self.element_names[:index_first_element]))
 
         return self.__class__(
-                         elements=new_elements, element_names=new_element_names)
-
-    def configure_radiation(self, mode=None):
-        assert mode in [None, 'mean', 'quantum']
-        if mode == 'mean':
-            radiation_flag = 1
-        elif mode == 'quantum':
-            radiation_flag = 2
-        else:
-            radiation_flag = 0
-
-        for kk, ee in self.element_dict.items():
-            if hasattr(ee, 'radiation_flag'):
-                ee.radiation_flag = radiation_flag
-
-        if radiation_flag == 2:
-            self._needs_rng = True
-        else:
-            self._needs_rng = False
+            elements=self.element_dict,
+            element_names=new_element_names,
+            particle_ref=self.particle_ref,
+        )
 
     def _freeze(self):
         self.element_names = tuple(self.element_names)
@@ -295,19 +303,56 @@ class Line:
     def __len__(self):
         return len(self.element_names)
 
+    def copy(self, _context=None, _buffer=None):
+
+        elements = {nn: ee.copy(_context=_context, _buffer=_buffer)
+                                    for nn, ee in self.element_dict.items()}
+        element_names = [nn for nn in self.element_names]
+
+        out = self.__class__(elements=elements, element_names=element_names)
+
+        if self.particle_ref is not None:
+            out.particle_ref = self.particle_ref.copy(
+                                        _context=_context, _buffer=_buffer)
+
+        if self._var_management is not None:
+            out._init_var_management(dct=self._var_management_to_dict())
+
+        return out
+
+
+    def _var_management_to_dict(self):
+        out = {}
+        out['_var_management_data'] = deepcopy(self._var_management['data'])
+        out['_var_manager'] = self._var_management['manager'].dump()
+        return out
+
     def to_dict(self):
         out = {}
-        out["elements"] = [el.to_dict() for el in self.elements]
+        out["elements"] = {k: el.to_dict() for k, el in self.element_dict.items()}
         out["element_names"] = self.element_names[:]
         if self.particle_ref is not None:
             out['particle_ref'] = self.particle_ref.to_dict()
         if self._var_management is not None:
-            out['_var_management_data'] = deepcopy(self._var_management['data'])
-            out['_var_manager'] = self._var_management['manager'].dump()
+            out.update(self._var_management_to_dict())
         return out
 
-    def copy(self):
-        return self.__class__.from_dict(self.to_dict())
+    def to_pandas(self):
+        elements = self.elements
+        s_elements = np.array(self.get_s_elements())
+        element_types = list(map(lambda e: e.__class__.__name__, elements))
+        isthick = np.array(list(map(_is_thick, elements)))
+
+        import pandas as pd
+
+        elements_df = pd.DataFrame({
+            'element_type': element_types,
+            's': s_elements,
+            'name': self.element_names,
+            'isthick': isthick,
+            'element': elements
+        })
+        return elements_df
 
     def insert_element(self, index=None, element=None, name=None, at_s=None,
                        s_tol=1e-6):
@@ -461,9 +506,12 @@ class Line:
         else:
             return s
 
-    def remove_inactive_multipoles(self, inplace=False):
+    def remove_inactive_multipoles(self, inplace=True):
 
         self._frozen_check()
+
+        if not inplace:
+            raise NotImplementedError
 
         newline = Line(elements=[], element_names=[])
 
@@ -474,15 +522,16 @@ class Line:
                     continue
             newline.append_element(ee, nn)
 
-        if inplace:
-            self.element_names = newline.element_names
-            return self
-        else:
-            return newline
 
-    def remove_zero_length_drifts(self, inplace=False):
+        self.element_names = newline.element_names
+        return self
+
+    def remove_zero_length_drifts(self, inplace=True):
 
         self._frozen_check()
+
+        if not inplace:
+            raise NotImplementedError
 
         newline = Line(elements=[], element_names=[])
 
@@ -492,20 +541,20 @@ class Line:
                     continue
             newline.append_element(ee, nn)
 
-        if inplace:
-            self.element_names = newline.element_names
-            return self
-        else:
-            return newline
+        self.element_names = newline.element_names
+        return self
 
-    def merge_consecutive_drifts(self, inplace=False):
+    def merge_consecutive_drifts(self, inplace=True):
 
         self._frozen_check()
 
+        if not inplace:
+            raise NotImplementedError
+
         newline = Line(elements=[], element_names=[])
 
-        for ee, nn in zip(self.elements, self.element_names):
-            if len(newline.elements) == 0:
+        for ii, (ee, nn) in enumerate(zip(self.elements, self.element_names)):
+            if ii == 0:
                 newline.append_element(ee, nn)
                 continue
 
@@ -514,26 +563,25 @@ class Line:
                 prev_ee = newline.element_dict[prev_nn]
                 if _is_drift(prev_ee):
                     prev_ee.length += ee.length
-                    newline.element_names[-1] = prev_nn
                 else:
                     newline.append_element(ee, nn)
             else:
                 newline.append_element(ee, nn)
 
-        if inplace:
-            self.element_dict.update(newline.element_dict)
-            self.element_names = newline.element_names
-            return self
-        else:
-            return newline
+        self.element_dict.update(newline.element_dict)
+        self.element_names = newline.element_names
+        return self
 
-    def merge_consecutive_multipoles(self, inplace=False):
+    def merge_consecutive_multipoles(self, inplace=True):
 
         self._frozen_check()
         if self._var_management is not None:
             raise NotImplementedError('`merge_consecutive_multipoles` not'
                                       ' available when deferred expressions are'
                                       ' used')
+
+        if not inplace:
+            raise NotImplementedError
 
         newline = Line(elements=[], element_names=[])
 
@@ -573,12 +621,33 @@ class Line:
             else:
                 newline.append_element(ee, nn)
 
-        if inplace:
-            self.element_dict.update(newline.element_dict)
-            self.element_names = newline.element_names
-            return self
-        else:
-            return newline
+        self.element_dict.update(newline.element_dict)
+        self.element_names = newline.element_names
+        return self
+
+    def use_simple_quadrupoles(self):
+        self._frozen_check()
+
+        for name, element in self.element_dict.items():
+            if _is_simple_quadrupole(element):
+                fast_quad = beam_elements.SimpleThinQuadrupole(
+                    knl=element.knl,
+                    _context=element._context,
+                )
+                self.element_dict[name] = fast_quad
+
+    def use_simple_bends(self):
+        self._frozen_check()
+
+        for name, element in self.element_dict.items():
+            if _is_simple_dipole(element):
+                fast_di = beam_elements.SimpleThinBend(
+                    knl=element.knl,
+                    hxl=element.hxl,
+                    length=element.length,
+                    _context=element._context,
+                )
+                self.element_dict[name] = fast_di
 
     def get_elements_of_type(self, types):
         if not hasattr(types, "__iter__"):
@@ -596,207 +665,132 @@ class Line:
 
         return elements, names
 
-    def _find_element_ids(self, element_name):
-        """Find element_name in this Line instance's
-        self.elements_name list. Assumes the names are unique.
+    def check_aperture(self):
 
-        Return index before and after the element, taking into account
-        attached _aperture instances (LimitRect, LimitEllipse, ...)
-        which would follow the element occurrence in the list.
+        elements_df = self.to_pandas()
 
-        Raises IndexError if element_name not found in this Line.
-        """
-        # will raise error if element not present:
-        idx_el = self.element_names.index(element_name)
-        try:
-            # if aperture marker is present
-            idx_after_el = self.element_names.index(element_name + "_aperture") + 1
-        except ValueError:
-            # if aperture marker is not present
-            idx_after_el = idx_el + 1
-        return idx_el, idx_after_el
+        elements_df['is_aperture'] = elements_df.element_type.map(lambda s: s.startswith('Limit'))
+        elements_df['i_aperture_upstream'] = np.nan
+        elements_df['s_aperture_upstream'] = np.nan
+        elements_df['i_aperture_downstream'] = np.nan
+        elements_df['s_aperture_downstream'] = np.nan
 
-    def _add_offset_error_to(self, element_name, dx=0, dy=0):
-        idx_el, idx_after_el = self._find_element_ids(element_name)
-        xyshift = beam_elements.XYShift(dx=dx, dy=dy)
-        inv_xyshift = beam_elements.XYShift(dx=-dx, dy=-dy)
-        self.insert_element(idx_el, xyshift, element_name + "_offset_in")
-        self.insert_element(
-            idx_after_el + 1, inv_xyshift, element_name + "_offset_out"
-        )
+        num_elements = len(self.element_names)
 
-    def _add_aperture_offset_error_to(self, element_name, arex=0, arey=0):
-        idx_el, idx_after_el = self._find_element_ids(element_name)
-        idx_el_aper = idx_after_el - 1
-        if not self.element_names[idx_el_aper] == element_name + "_aperture":
-            # it is allowed to provide arex/arey without providing an aperture
-            print('Info: Element', element_name, ': arex/y provided without aperture -> arex/y ignored')
-            return
-        xyshift = beam_elements.XYShift(dx=arex, dy=arey)
-        inv_xyshift = beam_elements.XYShift(dx=-arex, dy=-arey)
-        self.insert_element(idx_el_aper, xyshift, element_name + "_aperture_offset_in")
-        self.insert_element(
-            idx_after_el + 1, inv_xyshift, element_name + "_aperture_offset_out"
-        )
+        i_prev_aperture = elements_df[elements_df['is_aperture']].index[0]
+        i_next_aperture = 0
 
-    def _add_tilt_error_to(self, element_name, angle):
-        '''Alignment error of transverse rotation around s-axis.
-        The element corresponding to the given `element_name`
-        gets wrapped by SRotation elements with rotation angle
-        `angle`.
+        for iee in range(i_prev_aperture, num_elements):
 
-        In the case of a thin dipole component, the corresponding
-        curvature terms in the Multipole (hxl and hyl) are rotated
-        by `angle` as well.
-        '''
-        idx_el, idx_after_el = self._find_element_ids(element_name)
-        element = self.elements[self.element_names.index(element_name)]
-        if isinstance(element, beam_elements.Multipole) and (
-                element.hxl or element.hyl):
-            dpsi = angle * deg2rad
+            if iee % 100 == 0:
+                print(
+                    f'Checking aperture: {round(iee/num_elements*100):2d}%  ',
+                    end="\r", flush=True)
 
-            hxl0 = element.hxl
-            hyl0 = element.hyl
+            if elements_df.loc[iee, 'element_type'] == 'Drift':
+                continue
 
-            hxl1 = hxl0 * np.cos(dpsi) - hyl0 * np.sin(dpsi)
-            hyl1 = hxl0 * np.sin(dpsi) + hyl0 * np.cos(dpsi)
+            if elements_df.loc[iee, 'element_type'] == 'XYShift':
+                continue
 
-            element.hxl = hxl1
-            element.hyl = hyl1
-        srot = beam_elements.SRotation(angle=angle)
-        inv_srot = beam_elements.SRotation(angle=-angle)
-        self.insert_element(idx_el, srot, element_name + "_tilt_in")
-        self.insert_element(idx_after_el + 1, inv_srot, element_name + "_tilt_out")
+            if elements_df.loc[iee, 'element_type'] == 'SRotation':
+                continue
 
-    def _add_multipole_error_to(self, element_name, knl=[], ksl=[]):
-        # will raise error if element not present:
-        assert element_name in self.element_names
-        element_index = self.element_names.index(element_name)
-        element = self.elements[element_index]
+            if elements_df.loc[iee, 'is_aperture']:
+                i_prev_aperture = iee
+                continue
 
-        new_order = max([len(knl), len(ksl), len(element.knl), len(element.ksl)])
-        new_knl = new_order*[0]
-        new_ksl = new_order*[0]
+            if i_next_aperture < iee:
+                for ii in range(iee, num_elements):
+                    if elements_df.loc[ii, 'is_aperture']:
+                        i_next_aperture = ii
+                        break
 
-        # Original strengths
-        for ii, vv in enumerate(element.knl):
-            new_knl[ii] += element.knl[ii]
-        for ii, vv in enumerate(element.ksl):
-            new_ksl[ii] += element.ksl[ii]
+            elements_df.at[iee, 'i_aperture_upstream'] = i_prev_aperture
+            elements_df.at[iee, 'i_aperture_downstream'] = i_next_aperture
 
-        new_element = Multipole(knl=new_knl, ksl=new_ksl,
-                length=element.length, hxl=element.hxl,
-                hyl=element.hyl, radiation_flag=element.radiation_flag)
+            elements_df.at[iee, 's_aperture_upstream'] = elements_df.loc[i_prev_aperture, 's']
+            elements_df.at[iee, 's_aperture_downstream'] = elements_df.loc[i_next_aperture, 's']
 
-        self.element_dict[element_name] = new_element
+        # Check for elements missing aperture upstream
+        elements_df['misses_aperture_upstream'] = ((elements_df['s_aperture_upstream'] != elements_df['s'])
+            & ~(np.isnan(elements_df['i_aperture_upstream'])))
 
-        # Errors
-        if self._var_management is not None:
-            # Handle deferred expressions
-            lref = self._var_management['lref']
-            for ii, vv in enumerate(knl):
-                lref[element_name].knl[ii] += knl[ii]
-            for ii, vv in enumerate(ksl):
-                lref[element_name].ksl[ii] += ksl[ii]
-        else:
-            for ii, vv in enumerate(knl):
-                new_element.knl[ii] += knl[ii]
-            for ii, vv in enumerate(ksl):
-                new_element.ksl[ii] += ksl[ii]
+        # Check for elements missing aperture downstream
+        s_downstream = elements_df.s.copy()
+        df_thick_to_check = elements_df[elements_df['isthick'] & ~(elements_df.i_aperture_upstream.isna())].copy()
+        s_downstream.loc[df_thick_to_check.index] += np.array([ee.length for ee in df_thick_to_check.element])
+        elements_df['misses_aperture_downstream'] = (
+            (np.abs(elements_df['s_aperture_downstream'] - s_downstream) > 1e-6)
+            & ~(np.isnan(elements_df['i_aperture_upstream'])))
 
-    def _apply_madx_errors(self, madx_sequence):
-        """Applies errors from MAD-X sequence to existing
-        elements in this Line instance.
+        # Flag problems
+        elements_df['has_aperture_problem'] = (
+            elements_df['misses_aperture_upstream'] | (
+                elements_df['isthick'] & elements_df['misses_aperture_downstream']))
 
-        Return names of MAD-X elements with existing align_errors
-        or field_errors which were not found in the elements of
-        this Line instance (and thus not treated).
+        print('Done checking aperture.           ')
 
-        Example via cpymad:
-            madx = cpymad.madx.Madx()
+        # Identify issues with apertures associate with thin elements
+        df_thin_missing_aper = elements_df[elements_df['misses_aperture_upstream'] & ~elements_df['isthick']]
+        print(f'{len(df_thin_missing_aper)} thin elements miss associated aperture (upstream):')
+        pp(list(df_thin_missing_aper.name))
 
-            # (...set up lattice and errors in cpymad...)
+        # Identify issues with apertures associate with thin elements
+        df_thick_missing_aper = elements_df[
+            (elements_df['misses_aperture_upstream'] | elements_df['misses_aperture_downstream'])
+            & elements_df['isthick']]
+        print(f'{len(df_thick_missing_aper)} thick elements miss associated aperture (upstream or downstream):')
+        pp(list(df_thick_missing_aper.name))
 
-            seq = madx.sequence.some_lattice
-            line = Line.from_madx_sequence(
-                                    seq,
-                                    apply_madx_errors=True
-                              )
-        """
-        elements_not_found = []
-        for element, element_name in zip(
-                madx_sequence.expanded_elements,
-                madx_sequence.expanded_element_names()
-        ):
-            if element_name not in self.element_names:
-                if element.align_errors or element.field_errors:
-                    elements_not_found.append(element_name)
-                    continue
+        return elements_df
 
-            if element.align_errors:
-                # add offset
-                dx = element.align_errors.dx
-                dy = element.align_errors.dy
-                if dx or dy:
-                    self._add_offset_error_to(element_name, dx, dy)
-
-                # add tilt
-                dpsi = element.align_errors.dpsi
-                if dpsi:
-                    self._add_tilt_error_to(element_name, angle=dpsi / deg2rad)
-
-                # add aperture-only offset
-                arex = element.align_errors.arex
-                arey = element.align_errors.arey
-                if arex or arey:
-                    self._add_aperture_offset_error_to(element_name, arex, arey)
-
-                # check for errors which cannot be treated yet:
-                #for error_type in dir(element.align_errors):
-                 #   if not error_type[0] == '_' and \
-                  #          error_type not in ['dx', 'dy', 'dpsi', 'arex',
-                   #                            'arey', 'count', 'index']:
-                        #print(
-                        #    f'Warning: MAD-X error type "{error_type}"'
-                        #    " not implemented yet."
-                        #)
-
-            if element.field_errors:
-                # add multipole error
-                if any(element.field_errors.dkn) or \
-                            any(element.field_errors.dks):
-                    knl = element.field_errors.dkn
-                    ksl = element.field_errors.dks
-                    on=np.where(knl)[0]
-                    os=np.where(ksl)[0]
-                    on = on[-1] if len(on)>0 else 0
-                    os = os[-1] if len(os)>0 else 0
-                    oo = max(os,on)+1
-                    knl = knl[:oo]  # delete trailing zeros
-                    ksl = ksl[:oo]  # to keep order low
-                    self._add_multipole_error_to(element_name, knl, ksl)
-
-        return elements_not_found
 
 mathfunctions = type('math', (), {})
-mathfunctions.sqrt=math.sqrt
-mathfunctions.log=math.log
-mathfunctions.log10=math.log10
-mathfunctions.exp=math.exp
-mathfunctions.sin=math.sin
-mathfunctions.cos=math.cos
-mathfunctions.tan=math.tan
-mathfunctions.asin=math.asin
-mathfunctions.acos=math.acos
-mathfunctions.atan=math.atan
-mathfunctions.sinh=math.sinh
-mathfunctions.cosh=math.cosh
-mathfunctions.tanh=math.tanh
-mathfunctions.sinc=np.sinc
-mathfunctions.abs=math.fabs
-mathfunctions.erf=math.erf
-mathfunctions.erfc=math.erfc
-mathfunctions.floor=math.floor
-mathfunctions.ceil=math.ceil
-mathfunctions.round=np.round
-mathfunctions.frac=lambda x: (x%1)
+mathfunctions.sqrt = math.sqrt
+mathfunctions.log = math.log
+mathfunctions.log10 = math.log10
+mathfunctions.exp = math.exp
+mathfunctions.sin = math.sin
+mathfunctions.cos = math.cos
+mathfunctions.tan = math.tan
+mathfunctions.asin = math.asin
+mathfunctions.acos = math.acos
+mathfunctions.atan = math.atan
+mathfunctions.sinh = math.sinh
+mathfunctions.cosh = math.cosh
+mathfunctions.tanh = math.tanh
+mathfunctions.sinc = np.sinc
+mathfunctions.abs = math.fabs
+mathfunctions.erf = math.erf
+mathfunctions.erfc = math.erfc
+mathfunctions.floor = math.floor
+mathfunctions.ceil = math.ceil
+mathfunctions.round = np.round
+mathfunctions.frac = lambda x: (x % 1)
+
+
+def _deserialize_element(el, class_dict, _buffer):
+    eldct = el.copy()
+    eltype = class_dict[eldct.pop('__class__')]
+    if hasattr(eltype, '_XoStruct'):
+        return eltype.from_dict(eldct, _buffer=_buffer)
+    else:
+        return eltype.from_dict(eldct)
+
+
+def _is_simple_quadrupole(el):
+    if not isinstance(el, beam_elements.Multipole):
+        return False
+    return (el.order == 1 and
+            el.knl[0] == 0 and
+            el.length == 0 and
+            not any(el.ksl) and
+            not el.hxl and
+            not el.hyl)
+
+
+def _is_simple_dipole(el):
+    if not isinstance(el, beam_elements.Multipole):
+        return False
+    return el.order == 0 and not any(el.ksl) and not el.hyl

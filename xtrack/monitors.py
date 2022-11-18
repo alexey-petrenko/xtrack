@@ -1,6 +1,11 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import xobjects as xo
 
-from .base_element import dress_element
+from .base_element import BeamElement
 from .general import _pkg_root
 
 
@@ -96,36 +101,38 @@ class _FieldOfMonitor:
 
 def generate_monitor_class(ParticlesClass):
 
-    ParticlesMonitorDataClass = type(
-        "ParticlesMonitorData",
-        (xo.Struct,),
-        {
-            "start_at_turn": xo.Int64,
-            "stop_at_turn": xo.Int64,
-            'part_id_start': xo.Int64,
-            'part_id_end': xo.Int64,
-            'ebe_mode': xo.Int64,
-            "n_records": xo.Int64,
-            "n_repetitions": xo.Int64,
-            "repetition_period": xo.Int64,
-            "data": ParticlesClass.XoStruct,
-        },
-    )
+    _xofields = {
+        "start_at_turn": xo.Int64,
+        "stop_at_turn": xo.Int64,
+        'part_id_start': xo.Int64,
+        'part_id_end': xo.Int64,
+        'ebe_mode': xo.Int64,
+        "n_records": xo.Int64,
+        "n_repetitions": xo.Int64,
+        "repetition_period": xo.Int64,
+        "data": ParticlesClass._XoStruct,
+    }
 
-    ParticlesMonitorDataClass.extra_sources = [
+    _extra_c_sources = [
         _pkg_root.joinpath("monitors_src/monitors.h")
     ]
 
     ParticlesMonitorClass = type(
         "ParticlesMonitor",
-        (dress_element(ParticlesMonitorDataClass),),
-        {"_ParticlesClass": ParticlesClass},
+        (BeamElement,),
+        {"_ParticlesClass": ParticlesClass,
+        '_xofields': _xofields,
+        '_extra_c_sources': _extra_c_sources,
+        },
     )
 
     ParticlesMonitorClass.__init__ = _monitor_init
 
     per_particle_vars = ParticlesClass._structure["per_particle_vars"]
     for tt, nn in per_particle_vars:
+        setattr(ParticlesMonitorClass, nn, _FieldOfMonitor(name=nn))
+
+    for nn in ['pzeta']:
         setattr(ParticlesMonitorClass, nn, _FieldOfMonitor(name=nn))
 
     return ParticlesMonitorClass

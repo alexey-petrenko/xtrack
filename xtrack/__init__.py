@@ -1,19 +1,32 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 from .general import _pkg_root
 
-from .base_element import dress_element, BeamElement
+from .base_element import BeamElement
 from .beam_elements import *
-from .line_frozen import LineFrozen
+from .tracker_data import TrackerData
 from .line import Line
-from .tracker import Tracker
+from .tracker import Tracker, freeze_longitudinal
 from .loss_location_refinement import LossLocationRefinement
-from .interal_record import (RecordIdentifier, RecordIndex, new_io_buffer,
+from .internal_record import (RecordIdentifier, RecordIndex, new_io_buffer,
                              start_internal_logging, stop_internal_logging)
+from .pipeline import (PipelineStatus, PipelineMultiTracker, PipelineBranch,
+                        PipelineManager)
 
 from .monitors import generate_monitor_class
 from . import linear_normal_form
 
+from .mad_loader import MadLoader
+
+from .multisetter import MultiSetter
+
 import xpart as _xp
 ParticlesMonitor = generate_monitor_class(_xp.Particles)
+
+from ._version import __version__
 
 def Particles(*args, **kwargs):
     raise ValueError(

@@ -1,4 +1,8 @@
-from tkinter import W
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 
 import xtrack as xt
@@ -6,7 +10,7 @@ import xpart as xp
 import xobjects as xo
 
 def test_record_single_table():
-    class TestElementRecord(xo.DressedStruct):
+    class TestElementRecord(xo.HybridClass):
         _xofields = {
             '_index': xt.RecordIndex,
             'generated_rr': xo.Float64[:],
@@ -15,19 +19,13 @@ def test_record_single_table():
             'particle_id': xo.Int64[:]
             }
 
-    class TestElement(xt.BeamElement):
-        _xofields={
-            'n_kicks': xo.Int64,
-            }
-
-        _internal_record_class = TestElementRecord
-
-    TestElement.XoStruct.extra_sources.extend([
+    extra_src = []
+    extra_src.extend([
         xp._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
         xp._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
         ])
 
-    TestElement.XoStruct.extra_sources.append(r'''
+    extra_src.append(r'''
         /*gpufun*/
         void TestElement_track_local_particle(TestElementData el, LocalParticle* part0){
 
@@ -69,6 +67,16 @@ def test_record_single_table():
         }
         ''')
 
+    class TestElement(xt.BeamElement):
+        _xofields={
+            'n_kicks': xo.Int64,
+            }
+
+        _internal_record_class = TestElementRecord
+
+        _extra_c_sources = extra_src
+
+
     for context in xo.context.get_test_contexts():
         print(f"Test {context.__class__}")
         n_kicks0 = 5
@@ -89,8 +97,8 @@ def test_record_single_table():
         num_recorded = record._index.num_recorded
         num_turns = num_turns0 + num_turns1
         num_particles = len(part.x)
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
         assert num_recorded == (num_particles * num_turns * (n_kicks0 + n_kicks1))
 
         assert np.sum((record.at_element[:num_recorded] == 0)) == (num_particles * num_turns
@@ -129,8 +137,8 @@ def test_record_single_table():
 
         num_recorded = record._index.num_recorded
         num_turns = num_turns0
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
         assert np.all(part.at_turn == num_turns0 + num_turns1)
         assert num_recorded == (num_particles * num_turns
                                                 * (n_kicks0 + n_kicks1))
@@ -163,8 +171,8 @@ def test_record_single_table():
         tracker.track(part, num_turns=num_turns1)
 
         # Checks
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
         num_recorded = record._index.num_recorded
         num_turns = num_turns0
         num_particles = len(part.x)
@@ -182,7 +190,7 @@ def test_record_single_table():
 
 def test_record_multiple_tables():
 
-    class Table1(xo.DressedStruct):
+    class Table1(xo.HybridClass):
         _xofields = {
             '_index': xt.RecordIndex,
             'particle_x': xo.Float64[:],
@@ -192,7 +200,7 @@ def test_record_multiple_tables():
             'particle_id': xo.Int64[:]
             }
 
-    class Table2(xo.DressedStruct):
+    class Table2(xo.HybridClass):
         _xofields = {
             '_index': xt.RecordIndex,
             'generated_rr': xo.Float64[:],
@@ -201,24 +209,19 @@ def test_record_multiple_tables():
             'particle_id': xo.Int64[:]
             }
 
-    class TestElementRecord(xo.DressedStruct):
+    class TestElementRecord(xo.HybridClass):
         _xofields = {
-            'table1': Table1.XoStruct,
-            'table2': Table2.XoStruct
+            'table1': Table1,
+            'table2': Table2
             }
 
-    class TestElement(xt.BeamElement):
-        _xofields={
-            'n_kicks': xo.Int64,
-            }
-        _internal_record_class = TestElementRecord
-
-    TestElement.XoStruct.extra_sources.extend([
+    extra_src = []
+    extra_src.extend([
         xp._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
         xp._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
         ])
 
-    TestElement.XoStruct.extra_sources.append(r'''
+    extra_src.append(r'''
         /*gpufun*/
         void TestElement_track_local_particle(TestElementData el, LocalParticle* part0){
 
@@ -288,6 +291,15 @@ def test_record_multiple_tables():
         }
         ''')
 
+    class TestElement(xt.BeamElement):
+        _xofields={
+            'n_kicks': xo.Int64,
+            }
+        _internal_record_class = TestElementRecord
+
+        _extra_c_sources = extra_src
+
+
         # Checks
 
     for context in xo.context.get_test_contexts():
@@ -308,8 +320,8 @@ def test_record_multiple_tables():
         tracker.track(part, num_turns=num_turns0)
         tracker.track(part, num_turns=num_turns1)
 
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
 
         num_turns = num_turns0 + num_turns1
         num_particles = len(part.x)
@@ -366,8 +378,8 @@ def test_record_multiple_tables():
         tracker.stop_internal_logging_for_elements_of_type(TestElement)
         tracker.track(part, num_turns=num_turns1)
 
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
 
         num_turns = num_turns0
 
@@ -411,8 +423,8 @@ def test_record_multiple_tables():
         tracker.track(part, num_turns=num_turns1)
 
         # Checks
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
         num_turns = num_turns0
         num_particles = len(part.x)
 
@@ -437,7 +449,7 @@ def test_record_multiple_tables():
 
 def test_record_standalone_mode():
 
-    class Table1(xo.DressedStruct):
+    class Table1(xo.HybridClass):
         _xofields = {
             '_index': xt.RecordIndex,
             'particle_x': xo.Float64[:],
@@ -447,7 +459,7 @@ def test_record_standalone_mode():
             'particle_id': xo.Int64[:]
             }
 
-    class Table2(xo.DressedStruct):
+    class Table2(xo.HybridClass):
         _xofields = {
             '_index': xt.RecordIndex,
             'generated_rr': xo.Float64[:],
@@ -456,24 +468,19 @@ def test_record_standalone_mode():
             'particle_id': xo.Int64[:]
             }
 
-    class TestElementRecord(xo.DressedStruct):
+    class TestElementRecord(xo.HybridClass):
         _xofields = {
-            'table1': Table1.XoStruct,
-            'table2': Table2.XoStruct
+            'table1': Table1,
+            'table2': Table2
             }
 
-    class TestElement(xt.BeamElement):
-        _xofields={
-            'n_kicks': xo.Int64,
-            }
-        _internal_record_class = TestElementRecord
-
-    TestElement.XoStruct.extra_sources.extend([
+    extra_src = []
+    extra_src.extend([
         xp._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
         xp._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
         ])
 
-    TestElement.XoStruct.extra_sources.append(r'''
+    extra_src.append(r'''
         /*gpufun*/
         void TestElement_track_local_particle(TestElementData el, LocalParticle* part0){
 
@@ -543,6 +550,15 @@ def test_record_standalone_mode():
         }
         ''')
 
+    class TestElement(xt.BeamElement):
+        _xofields={
+            'n_kicks': xo.Int64,
+            }
+        _internal_record_class = TestElementRecord
+
+        _extra_c_sources = extra_src
+
+
     # Checks
 
     for context in xo.context.get_test_contexts():
@@ -568,8 +584,8 @@ def test_record_standalone_mode():
             part.at_element[:] = 0
             part.at_turn += 1
 
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
 
         num_turns = num_turns0 + num_turns1
         num_particles = len(part.x)
@@ -636,8 +652,8 @@ def test_record_standalone_mode():
             part.at_turn += 1
 
 
-        part._move_to(_context=xo.ContextCpu())
-        record._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record.move(_context=xo.ContextCpu())
 
         num_turns = num_turns0
 
@@ -678,9 +694,9 @@ def test_record_standalone_mode():
             part.at_element[:] = 0
             part.at_turn += 1
 
-        part._move_to(_context=xo.ContextCpu())
-        record0._move_to(_context=xo.ContextCpu())
-        record1._move_to(_context=xo.ContextCpu())
+        part.move(_context=xo.ContextCpu())
+        record0.move(_context=xo.ContextCpu())
+        record1.move(_context=xo.ContextCpu())
 
         num_turns = num_turns0 + num_turns1
         num_particles = len(part.x)

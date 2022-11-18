@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 
 import xobjects as xo
@@ -17,7 +22,7 @@ class LimitRect(BeamElement):
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.copy(_context=_context, _buffer=_buffer, _offset=_offset)
 
-LimitRect.XoStruct.extra_sources = [
+    _extra_c_sources = [
         _pkg_root.joinpath('beam_elements/apertures_src/limitrect.h')]
 
 
@@ -31,11 +36,12 @@ class LimitRacetrack(BeamElement):
         'b': xo.Float64,
         }
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/apertures_src/limitracetrack.h')]
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.copy(_context=_context, _buffer=_buffer, _offset=_offset)
 
-LimitRacetrack.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/apertures_src/limitracetrack.h')]
 
 class LimitEllipse(BeamElement):
     _xofields = {
@@ -88,7 +94,7 @@ class LimitEllipse(BeamElement):
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.copy(_context=_context, _buffer=_buffer, _offset=_offset)
 
-LimitEllipse.XoStruct.extra_sources = [
+    _extra_c_sources = [
         _pkg_root.joinpath('beam_elements/apertures_src/limitellipse.h')]
 
 
@@ -100,6 +106,27 @@ class LimitPolygon(BeamElement):
         'y_normal': xo.Float64[:],
         'resc_fac': xo.Float64
         }
+
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/apertures_src/limitpolygon.h')]
+
+    _kernels = {
+        'LimitPolygon_impact_point_and_normal': xo.Kernel(
+            args = [xo.Arg(xo.ThisClass, name='el'),
+                    xo.Arg(xo.Float64, pointer=True, name='x_in'),
+                    xo.Arg(xo.Float64, pointer=True, name='y_in'),
+                    xo.Arg(xo.Float64, pointer=True, name='z_in'),
+                    xo.Arg(xo.Float64, pointer=True, name='x_out'),
+                    xo.Arg(xo.Float64, pointer=True, name='y_out'),
+                    xo.Arg(xo.Float64, pointer=True, name='z_out'),
+                    xo.Arg(xo.Int64,   pointer=False, name='n_impacts'),
+                    xo.Arg(xo.Float64, pointer=True, name='x_inters'),
+                    xo.Arg(xo.Float64, pointer=True, name='y_inters'),
+                    xo.Arg(xo.Float64, pointer=True, name='z_inters'),
+                    xo.Arg(xo.Float64, pointer=True, name='Nx_inters'),
+                    xo.Arg(xo.Float64, pointer=True, name='Ny_inters'),
+                    xo.Arg(xo.Int64,   pointer=True, name='i_found')],
+            n_threads='n_impacts')}
 
     def __init__(self, x_vertices=None, y_vertices=None, **kwargs):
 
@@ -129,9 +156,11 @@ class LimitPolygon(BeamElement):
 
 
             if self.area < 0:
-                raise ValueError(
-                        "The area of the polygon is negative!\n"
-                        "Vertices must be provided with counter-clockwise order!")
+                self.x_vertices = self.x_vertices[::-1]
+                self.y_vertices = self.y_vertices[::-1]
+                #raise ValueError(
+                #        "The area of the polygon is negative!\n"
+                #        "Vertices must be provided with counter-clockwise order!")
 
             Nx = -np.diff(self.y_closed)
             Ny = np.diff(self.x_closed)
@@ -165,10 +194,7 @@ class LimitPolygon(BeamElement):
         ctx = self._buffer.context
 
         if 'LimitPolygon_impact_point_and_normal' not in ctx.kernels.keys():
-            ctx.add_kernels(
-                sources = (['#define NO_LIMITPOLYGON_TRACK_LOCAL_PARTICLE']
-                             + self.XoStruct.extra_sources),
-                kernels =  self.XoStruct.custom_kernels)
+            self.compile_kernels(only_if_needed=True)
 
         x_inters = ctx.zeros(shape=x_in.shape, dtype=np.float64)
         y_inters = ctx.zeros(shape=x_in.shape, dtype=np.float64)
@@ -200,27 +226,6 @@ class LimitPolygon(BeamElement):
         cx = 1/(6*self.area)*np.sum((x[:-1]+x[1:])*(x[:-1]*y[1:]-x[1:]*y[:-1]))
         cy = 1/(6*self.area)*np.sum((y[:-1]+y[1:])*(y[:-1]*x[1:]-y[1:]*x[:-1]))
         return (cx,cy)
-
-LimitPolygon.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/apertures_src/limitpolygon.h')]
-
-LimitPolygon.XoStruct.custom_kernels = {
-    'LimitPolygon_impact_point_and_normal': xo.Kernel(
-        args = [xo.Arg(LimitPolygon.XoStruct, name='el'),
-                xo.Arg(xo.Float64, pointer=True, name='x_in'),
-                xo.Arg(xo.Float64, pointer=True, name='y_in'),
-                xo.Arg(xo.Float64, pointer=True, name='z_in'),
-                xo.Arg(xo.Float64, pointer=True, name='x_out'),
-                xo.Arg(xo.Float64, pointer=True, name='y_out'),
-                xo.Arg(xo.Float64, pointer=True, name='z_out'),
-                xo.Arg(xo.Int64,   pointer=False, name='n_impacts'),
-                xo.Arg(xo.Float64, pointer=True, name='x_inters'),
-                xo.Arg(xo.Float64, pointer=True, name='y_inters'),
-                xo.Arg(xo.Float64, pointer=True, name='z_inters'),
-                xo.Arg(xo.Float64, pointer=True, name='Nx_inters'),
-                xo.Arg(xo.Float64, pointer=True, name='Ny_inters'),
-                xo.Arg(xo.Int64,   pointer=True, name='i_found')],
-        n_threads='n_impacts')}
 
 class LimitRectEllipse(BeamElement):
     _xofields = {
@@ -284,6 +289,22 @@ class LimitRectEllipse(BeamElement):
         self.a_b_squ = a_squ * b_squ
         return self
 
-LimitRectEllipse.XoStruct.extra_sources = [
+    _extra_c_sources = [
         _pkg_root.joinpath('beam_elements/apertures_src/limitrectellipse.h')]
+
+
+class LongitudinalLimitRect(BeamElement):
+    _xofields = {
+        'min_zeta': xo.Float64,
+        'max_zeta': xo.Float64,
+        'min_pzeta': xo.Float64,
+        'max_pzeta': xo.Float64,
+        }
+
+    def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
+        return self.copy(_context=_context, _buffer=_buffer, _offset=_offset)
+
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/apertures_src/longitudinallimitrect.h')]
+
 

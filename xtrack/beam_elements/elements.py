@@ -1,4 +1,7 @@
-from pathlib import Path
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
 
 import numpy as np
 from scipy.special import factorial
@@ -9,7 +12,7 @@ import xpart as xp
 
 from ..base_element import BeamElement
 from ..general import _pkg_root
-from ..interal_record import RecordIndex, RecordIdentifier
+from ..internal_record import RecordIndex, RecordIdentifier
 
 class ReferenceEnergyIncrease(BeamElement):
 
@@ -21,12 +24,12 @@ class ReferenceEnergyIncrease(BeamElement):
     _xofields = {
         'Delta_p0c': xo.Float64}
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/referenceenergyincrease.h')]
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(Delta_p0c=-self.Delta_p0c,
                               _context=_context, _buffer=_buffer, _offset=_offset)
-
-ReferenceEnergyIncrease.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/elements_src/referenceenergyincrease.h')]
 
 
 class Drift(BeamElement):
@@ -40,12 +43,13 @@ class Drift(BeamElement):
     isthick=True
     behaves_like_drift=True
 
+    _extra_c_sources = [_pkg_root.joinpath('beam_elements/elements_src/drift.h')]
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(length=-self.length,
                               _context=_context, _buffer=_buffer, _offset=_offset)
 
-Drift.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/elements_src/drift.h')]
+
 
 class Cavity(BeamElement):
     '''Beam element modeling an RF cavity. Parameters:
@@ -61,16 +65,16 @@ class Cavity(BeamElement):
         'lag': xo.Float64,
         }
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/cavity.h')]
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
                               voltage=-self.voltage,
                               frequency=self.frequency,
                               lag=self.lag,
                               _context=_context, _buffer=_buffer, _offset=_offset)
-
-Cavity.XoStruct.extra_sources = [
-        _pkg_root.joinpath('headers/constants.h'),
-        _pkg_root.joinpath('beam_elements/elements_src/cavity.h')]
 
 
 class XYShift(BeamElement):
@@ -85,29 +89,32 @@ class XYShift(BeamElement):
         'dy': xo.Float64,
         }
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/xyshift.h')]
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
                               dx=-self.dx, dy=-self.dy,
                               _context=_context, _buffer=_buffer, _offset=_offset)
 
-XYShift.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/elements_src/xyshift.h')]
-
-
-## ELECTRON LENS
 
 class Elens(BeamElement):
 # if array is needed we do it like this
 #    _xofields={'inner_radius': xo.Float64[:]}
     _xofields={
-               'current':      xo.Float64,
-               'inner_radius': xo.Float64,
-               'outer_radius': xo.Float64,
-               'elens_length': xo.Float64,
-               'voltage':      xo.Float64,
-               'residual_kick_x': xo.Float64,
-               'residual_kick_y': xo.Float64
+               'current'                : xo.Float64,
+               'inner_radius'           : xo.Float64,
+               'outer_radius'           : xo.Float64,
+               'elens_length'           : xo.Float64,
+               'voltage'                : xo.Float64,
+               'residual_kick_x'        : xo.Float64,
+               'residual_kick_y'        : xo.Float64,
+               'coefficients_polynomial': xo.Float64[:],
+               'polynomial_order'       : xo.Float64
               }
+
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/elens.h')]
 
     def __init__(self,  inner_radius = 1.,
                         outer_radius = 1.,
@@ -116,8 +123,12 @@ class Elens(BeamElement):
                         voltage      = 0.,
                         residual_kick_x = 0,
                         residual_kick_y = 0,
+                        coefficients_polynomial = [0],
                         _xobject = None,
                         **kwargs):
+
+        kwargs["coefficients_polynomial"] = len(coefficients_polynomial)
+
         if _xobject is not None:
             super().__init__(_xobject=_xobject)
         else:
@@ -130,6 +141,11 @@ class Elens(BeamElement):
             self.residual_kick_x   = residual_kick_x
             self.residual_kick_y   = residual_kick_y
 
+            self.coefficients_polynomial[:] = self._arr2ctx(coefficients_polynomial)
+            polynomial_order = len(coefficients_polynomial)-1
+            self.polynomial_order = polynomial_order
+
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
                               current=self.current,
@@ -137,13 +153,10 @@ class Elens(BeamElement):
                               outer_radius=self.outer_radius,
                               elens_length=-self.elens_length,
                               voltage=self.voltage,
+                              coefficients_polynomial = self.coefficients_polynomial,
+                              polynomial_order = self.polynomial_order,
                               _context=_context, _buffer=_buffer, _offset=_offset)
 
-Elens.XoStruct.extra_sources = [
-    _pkg_root.joinpath('beam_elements/elements_src/elens.h')]
-
-
-## Wire Element
 
 class Wire(BeamElement):
 
@@ -153,15 +166,26 @@ class Wire(BeamElement):
                'current': xo.Float64,
                'xma'    : xo.Float64,
                'yma'    : xo.Float64,
+
+               'post_subtract_px': xo.Float64,
+               'post_subtract_py': xo.Float64,
               }
+
+    _extra_c_sources = [
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/wire.h'),
+    ]
 
     def __init__(self,  L_phy   = 0,
                         L_int   = 0,
                         current = 0,
                         xma     = 0,
                         yma     = 0,
+                        post_subtract_px = 0,
+                        post_subtract_py = 0,
                         _xobject = None,
                         **kwargs):
+
         if _xobject is not None:
             super().__init__(_xobject=_xobject)
         else:
@@ -171,21 +195,12 @@ class Wire(BeamElement):
             self.current = current
             self.xma     = xma
             self.yma     = yma
+            self.post_subtract_px = post_subtract_px
+            self.post_subtract_py = post_subtract_py
+
 
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
-        return self.__class__(
-                              L_phy   = self.L_phy,
-                              L_int   = self.L_int,
-                              current = -self.current,
-                              xma     = self.xma,
-                              yma     = self.yma,
-                              _context=_context, _buffer=_buffer, _offset=_offset)
-
-Wire.XoStruct.extra_sources = [
-     _pkg_root.joinpath('headers/constants.h'),
-     _pkg_root.joinpath('beam_elements/elements_src/wire.h'),
-]
-
+        raise NotImplementedError
 
 
 class SRotation(BeamElement):
@@ -200,6 +215,9 @@ class SRotation(BeamElement):
         'sin_z': xo.Float64,
         }
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/srotation.h')]
+
     _store_in_to_dict = ['angle']
 
     def __init__(self, angle=0, **nargs):
@@ -212,25 +230,19 @@ class SRotation(BeamElement):
     def angle(self):
         return np.arctan2(self.sin_z, self.cos_z) * (180.0 / np.pi)
 
+    @angle.setter
+    def angle(self, value):
+        anglerad = value / 180 * np.pi
+        self.cos_z = np.cos(anglerad)
+        self.sin_z = np.sin(anglerad)
+
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
                               angle=-self.angle,
                               _context=_context, _buffer=_buffer, _offset=_offset)
 
-SRotation.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/elements_src/srotation.h')]
 
-
-def _update_bal_from_knl_ksl(knl, ksl, bal, context=None):
-    assert len(bal) == 2*len(knl) == 2*len(ksl)
-    idx = np.array([ii for ii in range(0, len(knl))])
-    inv_factorial = 1.0 / factorial(idx, exact=True)
-    if context is not None:
-        inv_factorial = context.nparray_to_context_array(inv_factorial)
-    bal[0::2] = knl * inv_factorial
-    bal[1::2] = ksl * inv_factorial
-
-class SynchrotronRadiationRecord(xo.DressedStruct):
+class SynchrotronRadiationRecord(xo.HybridClass):
     _xofields = {
         '_index': RecordIndex,
         'photon_energy': xo.Float64[:],
@@ -349,130 +361,194 @@ class Multipole(BeamElement):
 
     _xofields={
         'order': xo.Int64,
+        'inv_factorial_order': xo.Float64,
         'length': xo.Float64,
         'hxl': xo.Float64,
         'hyl': xo.Float64,
         'radiation_flag': xo.Int64,
-        'bal': xo.Float64[:],
+        'knl': xo.Float64[:],
+        'ksl': xo.Float64[:],
         }
 
-    _store_in_to_dict = ['knl', 'ksl']
+    _extra_c_sources = [
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('headers/synrad_spectrum.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/multipole.h')]
+
     _internal_record_class = SynchrotronRadiationRecord
 
-    def __init__(self, order=None, knl=None, ksl=None, bal=None, **kwargs):
+    def __init__(self, order=None, knl=None, ksl=None, **kwargs):
 
-        if bal is None and (
-            knl is not None or ksl is not None or order is not None
-        ):
-            if knl is None:
-                knl = []
-            if ksl is None:
-                ksl = []
-            if order is None:
-                order = 0
+        if '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
+            self.xoinitialize(**kwargs)
+            return
 
-            n = max((order + 1), max(len(knl), len(ksl)))
-            assert n > 0
+        if order is None:
+            order = 0
 
-            _knl = np.array(knl)
-            nknl = np.zeros(n, dtype=_knl.dtype)
-            nknl[: len(knl)] = knl
-            knl = nknl
-            del _knl
-            assert len(knl) == n
+        if "bal" in kwargs.keys():
+            if not "knl" in kwargs.keys() or not "ksl" in kwargs.keys():
+                _bal = kwargs['bal']
+                idxes = np.array([ii for ii in range(0, len(_bal), 2)])
+                knl = [_bal[idx] * factorial(idx // 2, exact=True) for idx in idxes]
+                ksl = [_bal[idx + 1] * factorial(idx // 2, exact=True) for idx in idxes]
 
-            _ksl = np.array(ksl)
-            nksl = np.zeros(n, dtype=_ksl.dtype)
-            nksl[: len(ksl)] = ksl
-            ksl = nksl
-            del _ksl
-            assert len(ksl) == n
+        len_knl = len(knl) if knl is not None else 0
+        len_ksl = len(ksl) if ksl is not None else 0
+        n = max((order + 1), max(len_knl, len_ksl))
+        assert n > 0
 
-            order = n - 1
-            bal = np.zeros(2 * order + 2)
+        nknl = np.zeros(n, dtype=np.float64)
+        nksl = np.zeros(n, dtype=np.float64)
 
-            _update_bal_from_knl_ksl(knl, ksl, bal)
+        if knl is not None:
+            nknl[: len(knl)] = np.array(knl)
 
-            kwargs["bal"] = bal
-            kwargs["order"] = order
+        if ksl is not None:
+            nksl[: len(ksl)] = np.array(ksl)
 
-        elif bal is not None and len(bal) > 0:
-            kwargs["bal"] = bal
-            kwargs["order"] = (len(bal) - 2) // 2
+        order = n - 1
+
+        kwargs["knl"] = nknl
+        kwargs["ksl"] = nksl
+        kwargs["order"] = order
+        kwargs["inv_factorial_order"] = 1.0 / factorial(order, exact=True)
 
         self.xoinitialize(**kwargs)
 
-    @property
-    def knl(self):
-        bal_length = len(self.bal)
-        idxes = np.array([ii for ii in range(0, bal_length, 2)])
-        _bal = self._buffer.context.nparray_from_context_array(self.bal)
-        _knl = self._buffer.context.nparray_to_context_array(np.array(
-            [_bal[idx] * factorial(idx // 2, exact=True) for idx in idxes]))
-        return self._buffer.context.linked_array_type.from_array(
-                                        _knl,
-                                        mode='setitem_from_container',
-                                        container=self,
-                                        container_setitem_name='_knl_setitem')
-
-    @knl.setter
-    def knl(self, value):
-        self.knl[:] = value
-
-    def _knl_setitem(self, indx, val):
-        _knl = self.knl.copy()
-        _knl[indx] = val
-        _update_bal_from_knl_ksl(_knl, self.ksl, self.bal,
-                                 context=self._buffer.context)
-
-    @property
-    def ksl(self):
-        bal_length = len(self.bal)
-        idxes = np.array([ii for ii in range(0, bal_length, 2)])
-        _bal = self._buffer.context.nparray_from_context_array(self.bal)
-        _ksl = self._buffer.context.nparray_to_context_array(np.array(
-            [_bal[idx + 1] * factorial(idx // 2, exact=True) for idx in idxes]))
-        return self._buffer.context.linked_array_type.from_array(
-                                        _ksl,
-                                        mode='setitem_from_container',
-                                        container=self,
-                                        container_setitem_name='_ksl_setitem')
-
-    @ksl.setter
-    def ksl(self, value):
-        self.ksl[:] = value
-
-    def _ksl_setitem(self, indx, val):
-        _ksl = self.ksl.copy()
-        _ksl[indx] = val
-        _update_bal_from_knl_ksl(self.knl, _ksl, self.bal,
-                                 context=self._buffer.context)
-
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
+        ctx2np = self._buffer.context.nparray_from_context_array
         return self.__class__(
                               order=self.order,
                               length=-self.length,
                               hxl=-self.hxl,
                               hyl=-self.hyl,
                               radiation_flag=0, #TODO, I force radiation off for now
-                              bal=-self.bal, # TODO: maybe it can be made more efficient
+                              knl=-ctx2np(self.knl), # TODO: maybe it can be made more efficient
+                              ksl=-ctx2np(self.ksl), # TODO: maybe it can be made more efficient
                               _context=_context, _buffer=_buffer, _offset=_offset)
 
-Multipole.XoStruct.extra_sources.extend([
-    xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
-    xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
-    _pkg_root.joinpath('headers/constants.h'),
-    _pkg_root.joinpath('headers/synrad_spectrum.h'),
-    _pkg_root.joinpath('beam_elements/elements_src/multipole.h')])
 
-def _update_phase_from_pn_ps(pn, ps, phase, context=None):
-    assert len(phase) == 2*len(pn) == 2*len(ps)
-    idx = np.array([ii for ii in range(0, len(pn))])
-    inv_factorial = 1.0 / factorial(idx, exact=True)
-    if context is not None:
-        inv_factorial = context.nparray_to_context_array(inv_factorial)
-    phase[0::2] = pn * inv_factorial
-    phase[1::2] = ps * inv_factorial
+class SimpleThinQuadrupole(BeamElement):
+    """An optimised version of a quadrupole with zero knl[0], ksl, hxl, hyl, and length.
+    Parameters:
+
+            - knl [m^-n, array]: Normalized integrated strength of the normal components.
+
+    """
+
+    _xofields={
+        'knl': xo.Float64[2],
+    }
+
+    _extra_c_sources = [
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/simplethinquadrupole.h')]
+
+    def __init__(self, knl=None, **kwargs):
+
+        if '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
+            self.xoinitialize(**kwargs)
+            return
+
+        if len(knl) != 2:
+            raise ValueError("For a quadrupole, len(knl) must be 2.")
+
+        kwargs["knl"] = knl
+        self.xoinitialize(**kwargs)
+
+    @property
+    def hxl(self): return 0.0
+
+    @property
+    def hyl(self): return 0.0
+
+    @property
+    def length(self): return 0.0
+
+    @property
+    def radiation_flag(self): return 0.0
+
+    @property
+    def order(self): return 1
+
+    @property
+    def inv_factorial_order(self): return 1.0
+
+    @property
+    def ksl(self): return self._buffer.context.linked_array_type.from_array(
+        np.array([0., 0.]),
+        mode='readonly',
+        container=self,
+    )
+
+    def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
+        ctx2np = self._buffer.context.nparray_from_context_array
+        return self.__class__(knl=-ctx2np(self.knl), _context=_context,
+                              _buffer=_buffer, _offset=_offset)
+
+
+class SimpleThinBend(BeamElement):
+    """An optimised version of a dipole with zero ksl and hyl. Parameters:
+
+            - knl [m^-n, array]: Normalized integrated strength of the normal components.
+            - hxl [rad]: Rotation angle of the reference trajectory in the horizontal plane.
+            - length [m]: Length of the originating thick multipole.
+
+    """
+
+    _xofields={
+        'knl': xo.Float64[1],
+        'hxl': xo.Float64,
+        'length': xo.Float64,
+    }
+
+    _extra_c_sources = [
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/simplethinbend.h')]
+
+    def __init__(self, knl=None, **kwargs):
+
+        if '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
+            self.xoinitialize(**kwargs)
+            return
+
+        if len(knl) != 1:
+            raise ValueError("For a quadrupole, len(knl) must be 1.")
+
+        kwargs["knl"] = knl
+        self.xoinitialize(**kwargs)
+
+    @property
+    def hyl(self): return 0.0
+
+    @property
+    def radiation_flag(self): return 0.0
+
+    @property
+    def order(self): return 0
+
+    @property
+    def inv_factorial_order(self): return 1.0
+
+    @property
+    def ksl(self): return self._buffer.context.linked_array_type.from_array(
+        np.array([0., 0.]),
+        mode='readonly',
+        container=self,
+    )
+
+    def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
+        ctx2np = self._buffer.context.nparray_from_context_array
+        return self.__class__(knl=-ctx2np(self.knl),
+                              hxl=-self.hxl,
+                              length=-self.length,
+                              _context=_context, _buffer=_buffer, _offset=_offset)
+
 
 class RFMultipole(BeamElement):
     '''Beam element modeling a thin modulated multipole, with strengths dependent on the z coordinate:
@@ -496,14 +572,19 @@ class RFMultipole(BeamElement):
 
     _xofields={
         'order': xo.Int64,
+        'inv_factorial_order': xo.Float64,
         'voltage': xo.Float64,
         'frequency': xo.Float64,
         'lag': xo.Float64,
-        'bal': xo.Float64[:],
-        'phase': xo.Float64[:],
+        'knl': xo.Float64[:],
+        'ksl': xo.Float64[:],
+        'pn': xo.Float64[:],
+        'ps': xo.Float64[:],
     }
 
-    _store_in_to_dict = ['knl', 'ksl', 'pn', 'ps']
+    _extra_c_sources = [
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/rfmultipole.h')]
 
     def __init__(
         self,
@@ -512,158 +593,61 @@ class RFMultipole(BeamElement):
         ksl=None,
         pn=None,
         ps=None,
-        bal=None,
-        phase=None,
         **kwargs
     ):
 
+        if '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
+            self.xoinitialize(**kwargs)
+            return
+
         assert 'p' not in kwargs, "`p` in RF Multipole is not supported anymore"
 
-        if bal is None and (
-            knl is not None
-            or ksl is not None
-            or pn is not None
-            or ps is not None
-            or order is not None
-        ):
-            if knl is None:
-                knl = []
-            if ksl is None:
-                ksl = []
-            if pn is None:
-                pn = []
-            if ps is None:
-                ps = []
-            if order is None:
-                order = 0
+        if order is None:
+            order = 0
 
-            n = max((order + 1), max(len(knl), len(ksl), len(pn), len(ps)))
-            assert n > 0
-
-            _knl = np.array(knl)
-            nknl = np.zeros(n, dtype=_knl.dtype)
-            nknl[: len(knl)] = knl
-            knl = nknl
-            del _knl
-            assert len(knl) == n
-
-            _ksl = np.array(ksl)
-            nksl = np.zeros(n, dtype=_ksl.dtype)
-            nksl[: len(ksl)] = ksl
-            ksl = nksl
-            del _ksl
-            assert len(ksl) == n
-
-            _pn = np.array(pn)
-            npn = np.zeros(n, dtype=_pn.dtype)
-            npn[: len(pn)] = pn
-            pn = npn
-            del _pn
-            assert len(pn) == n
-
-            _ps = np.array(ps)
-            nps = np.zeros(n, dtype=_ps.dtype)
-            nps[: len(ps)] = ps
-            ps = nps
-            del _ps
-            assert len(ps) == n
-
-            order = n - 1
-            bal = np.zeros(2 * order + 2)
-            phase = np.zeros(2 * order + 2)
-
-            idx = np.array([ii for ii in range(0, len(knl))])
-            inv_factorial = 1.0 / factorial(idx, exact=True)
-            bal[0::2] = knl * inv_factorial
-            bal[1::2] = ksl * inv_factorial
-
-            phase[0::2] = pn
-            phase[1::2] = ps
-
-            kwargs["bal"] = bal
-            kwargs["phase"] = phase
-            kwargs["order"] = order
-
-        elif (
-            bal is not None
-            #and bal
-            and len(bal) >= 2
-            and ((len(bal) % 2) == 0)
-            and phase is not None
-            #and phase
-            and len(phase) >= 2
-            and ((len(phase) % 2) == 0)
-        ):
-            kwargs["bal"] = bal
-            kwargs["phase"] = phase
-            kwargs["order"] = (len(bal) - 2) / 2
-        elif '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
-            pass
-        else:
-            raise ValueError('RF Multipole Invalid input!')
+        if "bal" in kwargs.keys():
+            if not "knl" in kwargs.keys() or not "ksl" in kwargs.keys():
+                _bal = kwargs['bal']
+                idxes = np.array([ii for ii in range(0, len(_bal), 2)])
+                knl = [_bal[idx] * factorial(idx // 2, exact=True) for idx in idxes]
+                ksl = [_bal[idx + 1] * factorial(idx // 2, exact=True) for idx in idxes]
 
 
-        if '_xobject' in kwargs.keys() and kwargs['_xobject'] is not None:
-            super().__init__(**kwargs)
-        else:
-            temp_bal = kwargs["bal"]
-            temp_phase = kwargs["phase"]
+        len_knl = len(knl) if knl is not None else 0
+        len_ksl = len(ksl) if ksl is not None else 0
+        len_pn = len(pn) if pn is not None else 0
+        len_ps = len(ps) if ps is not None else 0
+        n = max((order + 1), max(len_knl, len_ksl, len_pn, len_ps))
+        assert n > 0
 
-            kwargs["bal"] = len(temp_bal)
-            kwargs["phase"] = len(temp_phase)
+        nknl = np.zeros(n, dtype=np.float64)
+        nksl = np.zeros(n, dtype=np.float64)
+        npn = np.zeros(n, dtype=np.float64)
+        nps = np.zeros(n, dtype=np.float64)
 
-            super().__init__(**kwargs)
+        if knl is not None:
+            nknl[: len(knl)] = np.array(knl)
 
-            ctx = self._buffer.context
-            self.bal[:] = ctx.nparray_to_context_array(temp_bal)
-            self.phase[:] = ctx.nparray_to_context_array(temp_phase)
+        if ksl is not None:
+            nksl[: len(ksl)] = np.array(ksl)
 
+        if pn is not None:
+            npn[: len(pn)] = np.array(pn)
 
-    @property
-    def pn(self):
-        phase_length = len(self.phase)
-        idxes = np.array([ii for ii in range(0, phase_length, 2)])
-        _phase = self._buffer.context.nparray_from_context_array(self.phase)
-        _pn = self._buffer.context.nparray_to_context_array(np.array(
-            [_phase[idx] * factorial(idx // 2, exact=True) for idx in idxes]))
-        return self._buffer.context.linked_array_type.from_array(
-                                        _pn,
-                                        mode='setitem_from_container',
-                                        container=self,
-                                        container_setitem_name='_pn_setitem')
+        if ps is not None:
+            nps[: len(ps)] = np.array(ps)
 
-    @pn.setter
-    def pn(self, value):
-        self.pn[:] = value
+        order = n - 1
 
-    def _pn_setitem(self, indx, val):
-        _pn = self.pn.copy()
-        _pn[indx] = val
-        _update_phase_from_pn_ps(_pn, self.ps, self.phase,
-                                 context=self._buffer.context)
+        kwargs["knl"] = nknl
+        kwargs["ksl"] = nksl
+        kwargs["pn"] = npn
+        kwargs["ps"] = nps
+        kwargs["order"] = order
+        #kwargs["inv_factorial_order"] = 1.0 / factorial(order, exact=True)
 
-    @property
-    def ps(self):
-        phase_length = len(self.phase)
-        idxes = np.array([ii for ii in range(0, phase_length, 2)])
-        _phase = self._buffer.context.nparray_from_context_array(self.phase)
-        _ps = self._buffer.context.nparray_to_context_array(np.array(
-            [_phase[idx + 1] * factorial(idx // 2, exact=True) for idx in idxes]))
-        return self._buffer.context.linked_array_type.from_array(
-                                        _ps,
-                                        mode='setitem_from_container',
-                                        container=self,
-                                        container_setitem_name='_ps_setitem')
+        self.xoinitialize(**kwargs)
 
-    @ps.setter
-    def ps(self, value):
-        self.ps[:] = value
-
-    def _ps_setitem(self, indx, val):
-        _ps = self.ps.copy()
-        _ps[indx] = val
-        _update_phase_from_pn_ps(self.pn, _ps, self.phase,
-                                 context=self._buffer.context)
 
     def get_backtrack_element(self, _context=None, _buffer=None, _offset=None):
         return self.__class__(
@@ -671,18 +655,11 @@ class RFMultipole(BeamElement):
                               voltage=-self.voltage,
                               frequency=self.frequency,
                               lag=self.lag,
-                              bal=[-bb for bb in self.bal], # TODO: maybe it can be made more efficient
-                              p = [pp for pp in self.phase],
+                              knl=-self.knl,
+                              ksl=-self.ksl,
+                              pn = self.pn,
+                              ps = self.ps,
                               _context=_context, _buffer=_buffer, _offset=_offset)
-
-RFMultipole.knl = Multipole.knl
-RFMultipole.ksl = Multipole.ksl
-RFMultipole._knl_setitem = Multipole._knl_setitem
-RFMultipole._ksl_setitem = Multipole._ksl_setitem
-
-RFMultipole.XoStruct.extra_sources = [
-        _pkg_root.joinpath('headers/constants.h'),
-        _pkg_root.joinpath('beam_elements/elements_src/rfmultipole.h')]
 
 
 class DipoleEdge(BeamElement):
@@ -704,6 +681,9 @@ class DipoleEdge(BeamElement):
             'fint': xo.Float64,
             }
 
+    _extra_c_sources = [
+        _pkg_root.joinpath('beam_elements/elements_src/dipoleedge.h')]
+
     _store_in_to_dict = ['h', 'e1', 'hgap', 'fint']
     _skip_in_to_dict = ['r21', 'r43']
 
@@ -719,7 +699,7 @@ class DipoleEdge(BeamElement):
     ):
 
         if r21 is not None or r43 is not None:
-            raise NoImplementedError(
+            raise NotImplementedError(
                 "Please initialize using `h`, `e1`, `hgap` and `fint`")
 
         if hgap is None:
@@ -753,10 +733,6 @@ class DipoleEdge(BeamElement):
                               r21=-self.r21,
                               r43=-self.r43,
                               _context=_context, _buffer=_buffer, _offset=_offset)
-
-
-DipoleEdge.XoStruct.extra_sources = [
-        _pkg_root.joinpath('beam_elements/elements_src/dipoleedge.h')]
 
 
 class LinearTransferMatrix(BeamElement):
@@ -803,9 +779,18 @@ class LinearTransferMatrix(BeamElement):
         'damping_factor_s':xo.Float64,
         'uncorrelated_gauss_noise': xo.Int64,
         'gauss_noise_ampl_x':xo.Float64,
+        'gauss_noise_ampl_px':xo.Float64,
         'gauss_noise_ampl_y':xo.Float64,
-        'gauss_noise_ampl_s':xo.Float64,
+        'gauss_noise_ampl_py':xo.Float64,
+        'gauss_noise_ampl_zeta':xo.Float64,
+        'gauss_noise_ampl_delta':xo.Float64,
         }
+
+    _extra_c_sources = [
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/lineartransfermatrix.h')]
 
     def __init__(self, Q_x=0, Q_y=0,
                      beta_x_0=1.0, beta_x_1=1.0, beta_y_0=1.0, beta_y_1=1.0,
@@ -819,7 +804,7 @@ class LinearTransferMatrix(BeamElement):
                      y_ref_0 = 0.0, py_ref_0 = 0.0, y_ref_1 = 0.0, py_ref_1 = 0.0,
                      damping_rate_x = 0.0, damping_rate_y = 0.0, damping_rate_s = 0.0,
                      equ_emit_x = 0.0, equ_emit_y = 0.0, equ_emit_s = 0.0,
-                     gauss_noise_ampl_x=0.0,gauss_noise_ampl_y=0.0,gauss_noise_ampl_s=0.0,
+                     gauss_noise_ampl_x=0.0,gauss_noise_ampl_px=0.0,gauss_noise_ampl_y=0.0,gauss_noise_ampl_py=0.0,gauss_noise_ampl_zeta=0.0,gauss_noise_ampl_delta=0.0,
                      **nargs):
 
         if (chroma_x==0 and chroma_y==0
@@ -899,21 +884,46 @@ class LinearTransferMatrix(BeamElement):
             raise ValueError('Equilibrium emittances cannot be negative')
         nargs['uncorrelated_gauss_noise'] = False
         nargs['gauss_noise_ampl_x'] = 0.0
+        nargs['gauss_noise_ampl_px'] = 0.0
         nargs['gauss_noise_ampl_y'] = 0.0
-        nargs['gauss_noise_ampl_s'] = 0.0
-        if equ_emit_x > 0.0 or equ_emit_y > 0.0 or equ_emit_s > 0.0:
-            nargs['uncorrelated_gauss_noise'] = True
-            nargs['gauss_noise_ampl_x'] = np.sqrt(2.0*equ_emit_x*damping_rate_x/beta_x_1)
-            nargs['gauss_noise_ampl_y'] = np.sqrt(2.0*equ_emit_y*damping_rate_y/beta_y_1)
-            nargs['gauss_noise_ampl_s'] = np.sqrt(2.0*equ_emit_s*damping_rate_s/beta_s)
+        nargs['gauss_noise_ampl_py'] = 0.0
+        nargs['gauss_noise_ampl_zeta'] = 0.0
+        nargs['gauss_noise_ampl_delta'] = 0.0
 
-        if gauss_noise_ampl_x < 0.0 or gauss_noise_ampl_y < 0.0 or gauss_noise_ampl_s < 0.0:
-            raise ValueError('Gaussian noise amplitude cannot be negative')
-        if gauss_noise_ampl_x > 0.0 or gauss_noise_ampl_y > 0.0 or gauss_noise_ampl_s > 0.0:
+        assert equ_emit_x >= 0.0
+        assert equ_emit_y >= 0.0
+        assert equ_emit_s >= 0.0
+
+        if equ_emit_x > 0.0:
+            assert alpha_x_1 == 0
+            nargs['uncorrelated_gauss_noise'] = True
+            nargs['gauss_noise_ampl_px'] = np.sqrt(equ_emit_x*damping_rate_x/beta_x_1)
+            nargs['gauss_noise_ampl_x'] = beta_x_1*nargs['gauss_noise_ampl_px']
+        if equ_emit_y > 0.0:
+            assert alpha_y_1 == 0
+            nargs['uncorrelated_gauss_noise'] = True
+            nargs['gauss_noise_ampl_py'] = np.sqrt(equ_emit_y*damping_rate_y/beta_y_1)
+            nargs['gauss_noise_ampl_y'] = beta_y_1*nargs['gauss_noise_ampl_py']
+        if equ_emit_s > 0.0:
+            nargs['uncorrelated_gauss_noise'] = True
+            nargs['gauss_noise_ampl_delta'] = np.sqrt(equ_emit_s*damping_rate_s/beta_s)
+            nargs['gauss_noise_ampl_zeta'] = beta_s*nargs['gauss_noise_ampl_delta']
+
+        assert gauss_noise_ampl_x >= 0.0
+        assert gauss_noise_ampl_px >= 0.0
+        assert gauss_noise_ampl_y >= 0.0
+        assert gauss_noise_ampl_py >= 0.0
+        assert gauss_noise_ampl_zeta >= 0.0
+        assert gauss_noise_ampl_delta >= 0.0
+
+        if gauss_noise_ampl_x > 0.0 or gauss_noise_ampl_px > 0.0 or gauss_noise_ampl_y > 0.0 or gauss_noise_ampl_py > 0.0 or gauss_noise_ampl_zeta > 0.0 or gauss_noise_ampl_delta > 0.0:
             nargs['uncorrelated_gauss_noise'] = True
             nargs['gauss_noise_ampl_x'] = np.sqrt(nargs['gauss_noise_ampl_x']**2+gauss_noise_ampl_x**2)
+            nargs['gauss_noise_ampl_px'] = np.sqrt(nargs['gauss_noise_ampl_px']**2+gauss_noise_ampl_px**2)
             nargs['gauss_noise_ampl_y'] = np.sqrt(nargs['gauss_noise_ampl_y']**2+gauss_noise_ampl_y**2)
-            nargs['gauss_noise_ampl_s'] = np.sqrt(nargs['gauss_noise_ampl_s']**2+gauss_noise_ampl_s**2)
+            nargs['gauss_noise_ampl_py'] = np.sqrt(nargs['gauss_noise_ampl_py']**2+gauss_noise_ampl_py**2)
+            nargs['gauss_noise_ampl_zeta'] = np.sqrt(nargs['gauss_noise_ampl_zeta']**2+gauss_noise_ampl_zeta**2)
+            nargs['gauss_noise_ampl_delta'] = np.sqrt(nargs['gauss_noise_ampl_delta']**2+gauss_noise_ampl_delta**2)
 
         super().__init__(**nargs)
 
@@ -929,11 +939,7 @@ class LinearTransferMatrix(BeamElement):
     def beta_y_1(self):
         return self.beta_prod_y*self.beta_ratio_y
 
-LinearTransferMatrix.XoStruct.extra_sources = [
-        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
-        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
-        _pkg_root.joinpath('headers/constants.h'),
-        _pkg_root.joinpath('beam_elements/elements_src/lineartransfermatrix.h')]
+
 
 class FirstOrderTaylorMap(BeamElement):
     isthick = True
@@ -943,6 +949,13 @@ class FirstOrderTaylorMap(BeamElement):
         'length': xo.Float64,
         'm0': xo.Float64[6],
         'm1': xo.Float64[6,6]}
+
+    _extra_c_sources = [
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
+        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
+        _pkg_root.joinpath('headers/constants.h'),
+        _pkg_root.joinpath('headers/synrad_spectrum.h'),
+        _pkg_root.joinpath('beam_elements/elements_src/firstordertaylormap.h')]
 
     _internal_record_class = SynchrotronRadiationRecord # not functional,
     # included for compatibility with Multipole
@@ -966,9 +979,4 @@ class FirstOrderTaylorMap(BeamElement):
                 raise ValueError(f'Wrong shape for m1: {np.shape(m1)}')
         super().__init__(**nargs)
 
-FirstOrderTaylorMap.XoStruct.extra_sources.extend([
-        xp.general._pkg_root.joinpath('random_number_generator/rng_src/base_rng.h'),
-        xp.general._pkg_root.joinpath('random_number_generator/rng_src/local_particle_rng.h'),
-        _pkg_root.joinpath('headers/constants.h'),
-        _pkg_root.joinpath('headers/synrad_spectrum.h'),
-        _pkg_root.joinpath('beam_elements/elements_src/firstordertaylormap.h')])
+

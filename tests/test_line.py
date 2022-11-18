@@ -1,13 +1,25 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
+
+import xobjects as xo
 import xtrack as xt
 
 def test_simplification_methods():
 
     line = xt.Line(
-        elements = [xt.Drift(length=1) for _ in range(5)]
-    )
+        elements=([xt.Drift(length=0)] # Start line marker
+                    + [xt.Drift(length=1) for _ in range(5)]
+                    + [xt.Drift(length=0)] # End line marker
+            )
+        )
+
     line.insert_element(element=xt.Cavity(), name="cav", at_s=3.3)
     line.merge_consecutive_drifts(inplace=True)
+    assert len(line.element_names) == 3
     assert line.get_length() == line.get_s_elements(mode='downstream')[-1] == 5
     assert np.isclose(line[0].length, 3.3, rtol=0, atol=1e-12)
     assert isinstance(line[1], xt.Cavity)
@@ -133,3 +145,161 @@ def test_insert():
                 ['d0_part0', 'inserted_drift', 'd1_part1', 'm1', 'd2', 'm2', 'd3',
                 'm3', 'd4', 'm4']))])
     assert line.get_length() == line.get_s_elements(mode='downstream')[-1] == 5
+
+def test_to_pandas():
+
+    line = xt.Line(elements=[
+        xt.Drift(length=1), xt.Cavity(), xt.Drift(length=1)])
+
+    df = line.to_pandas()
+
+    assert tuple(df.columns) == (
+                            'element_type', 's', 'name', 'isthick', 'element')
+    assert len(df) == 3
+
+def test_check_aperture():
+
+    class ThickElement:
+
+        length = 2.
+        isthick = True
+
+    line = xt.Line(
+        elements={
+            'dum': xt.Drift(length=0),
+            'dr1': xt.Drift(length=1),
+            'm1_ap': xt.LimitEllipse(a=1e-2, b=1e-2),
+            'm1': xt.Multipole(knl=[1]),
+            'dr2': xt.Drift(length=1),
+            'm2': xt.Multipole(knl=[1]),
+            'dr3': xt.Drift(length=1),
+            'th1_ap_front': xt.LimitEllipse(a=1e-2, b=1e-2),
+            'th1': ThickElement(),
+            'th1_ap_back': xt.LimitEllipse(a=1e-2, b=1e-2),
+            'dr4': xt.Drift(length=1),
+            'th2': ThickElement(),
+            'th2_ap_back': xt.LimitEllipse(a=1e-2, b=1e-2),
+            'dr5': xt.Drift(length=1),
+            'th3_ap_front': xt.LimitEllipse(a=1e-2, b=1e-2),
+            'th3': ThickElement(),
+            'dr6': xt.Drift(length=1),
+        },
+        element_names=['dr1', 'm1_ap', 'dum', 'm1', 'dr2', 'm2', 'dr3',
+                       'th1_ap_front', 'dum', 'th1', 'dum', 'th1_ap_back',
+                       'dr4', 'th2', 'th2_ap_back',
+                       'dr5', 'th3_ap_front', 'th3'])
+    df = line.check_aperture()
+
+    expected_miss_upstream = [nn in ('m2', 'th2') for nn in df['name'].values]
+    expected_miss_downstream = [nn in ('m1', 'm2', 'th3') for nn in df['name'].values]
+    expected_problem_flag = np.array(expected_miss_upstream) | (df.isthick &
+                                        np.array(expected_miss_downstream))
+
+    assert np.all(df['misses_aperture_upstream'].values == expected_miss_upstream)
+    assert np.all(df['misses_aperture_downstream'].values == expected_miss_downstream)
+    assert np.all(df['has_aperture_problem'].values == expected_problem_flag)
+
+def test_to_dict():
+    line = xt.Line(
+        elements={
+            'm': xt.Multipole(knl=[1, 2]),
+            'd': xt.Drift(length=1),
+        },
+        element_names=['m', 'd', 'm', 'd']
+    )
+    result = line.to_dict()
+
+    assert len(result['elements']) == 2
+    assert result['element_names'] == ['m', 'd', 'm', 'd']
+
+    assert result['elements']['m']['__class__'] == 'Multipole'
+    assert (result['elements']['m']['knl'] == [1, 2]).all()
+
+    assert result['elements']['d']['__class__'] == 'Drift'
+    assert result['elements']['d']['length'] == 1
+
+
+def test_from_dict_legacy():
+    test_dict = {
+        'elements': [
+            {'__class__': 'Multipole', 'knl': [1, 2]},
+            {'__class__': 'Drift', 'length': 1},
+        ],
+        'element_names': ['mn1', 'd1'],
+    }
+    result = xt.Line.from_dict(test_dict)
+
+    assert len(result.elements) == 2
+
+    assert isinstance(result.elements[0], xt.Multipole)
+    assert (result.elements[0].knl == [1, 2]).all()
+
+    assert isinstance(result.elements[1], xt.Drift)
+    assert result.elements[1].length == 1
+
+    assert result.element_names == ['mn1', 'd1']
+
+
+def test_from_dict_current():
+    test_dict = {
+        'elements': {
+            'mn': {
+                '__class__': 'Multipole',
+                'knl': [1, 2],
+            },
+            'ms': {
+                '__class__': 'Multipole',
+                'ksl': [3],
+            },
+            'd': {
+                '__class__': 'Drift',
+                'length': 4,
+            },
+        },
+        'element_names': ['mn', 'd', 'ms', 'd']
+    }
+    line = xt.Line.from_dict(test_dict)
+
+    assert line.element_names == ['mn', 'd', 'ms', 'd']
+    mn, d1, ms, d2 = line.elements
+
+    assert isinstance(mn, xt.Multipole)
+    assert (mn.knl == [1, 2]).all()
+
+    assert isinstance(ms, xt.Multipole)
+    assert (ms.ksl == [3]).all()
+
+    assert isinstance(d1, xt.Drift)
+    assert d1.length == 4
+
+    assert d2 is d1
+
+
+def test_optimize_multipoles():
+    for context in xo.context.get_test_contexts():
+        elements = {
+            'q1': xt.Multipole(knl=[0, 1], length=0, _context=context),
+            'q2': xt.Multipole(knl=[1, 2], length=0, _context=context),
+            'q3': xt.Multipole(knl=[0, 1], length=1, _context=context),
+            'q4': xt.Multipole(knl=[0, 1], ksl=[1, 2], length=0, _context=context),
+            'd1': xt.Multipole(knl=[1], hxl=0.0, length=2, _context=context),
+            'd2': xt.Multipole(knl=[1], hxl=0.1, length=0, _context=context),
+            'd3': xt.Multipole(knl=[1], hyl=1, length=2, _context=context),
+            'd4': xt.Multipole(knl=[1], ksl=[3], length=2, _context=context),
+        }
+
+        test_line = xt.Line(
+            elements=elements,
+            element_names=elements.keys(),
+        )
+
+        test_line.use_simple_bends()
+        test_line.use_simple_quadrupoles()
+
+        for nn in test_line.element_names:
+            if nn in ('d1', 'd2'):
+                assert type(test_line.element_dict[nn]) is xt.SimpleThinBend
+            elif nn == 'q1':
+                assert type(test_line.element_dict[nn]) is xt.SimpleThinQuadrupole
+            else:
+                assert type(test_line.element_dict[nn]) is xt.Multipole

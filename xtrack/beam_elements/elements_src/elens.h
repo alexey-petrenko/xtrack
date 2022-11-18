@@ -1,3 +1,8 @@
+// copyright ############################### //
+// This file is part of the Xtrack Package.  //
+// Copyright (c) CERN, 2021.                 //
+// ######################################### //
+
 #ifndef XTRACK_ELENS_H
 #define XTRACK_ELENS_H
 
@@ -12,12 +17,12 @@ void Elens_track_local_particle(ElensData el, LocalParticle* part0){
     double const residual_kick_x = ElensData_get_residual_kick_x(el);
     double const residual_kick_y = ElensData_get_residual_kick_y(el);
 
+    int const polynomial_order = ElensData_get_polynomial_order(el);
 
-    // double const cos_z = SRotationData_get_cos_z(el);
+    double const* coefficients_polynomial =
+                                ElensData_getp1_coefficients_polynomial(el, 0);
 
     //start_per_particle_block (part0->part)
-
-      // EPSILON_0, PI, C_LIGHT,
 
         // electron mass
         double const EMASS  = 510998.928;
@@ -93,9 +98,20 @@ void Elens_track_local_particle(ElensData el, LocalParticle* part0){
         }
         else
         {
-          frr = ((r*r - r1*r1)/(r2*r2 - r1*r1));
-        }
+          // frr = ((r*r - r1*r1)/(r2*r2 - r1*r1));
+          if (polynomial_order ==0)
+            {
+              frr = ((r*r - r1*r1)/(r2*r2 - r1*r1));
+            }
+          else
+            {
+              frr = 0;
+              for(int i=0; i<(polynomial_order+1); ++i){
+                frr += coefficients_polynomial[i]*pow((double)(r*1e3), (double)(polynomial_order-i));
+            }
 
+            }
+        }
 
         // # calculate the kick at r2 (maximum kick)
         double theta_max = ((1.0/(4.0*PI*EPSILON_0)));

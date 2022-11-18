@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import json
 
 import numpy as np
@@ -39,7 +44,7 @@ with open('line_no_spacecharge_and_particle.json', 'w') as fid:
     json.dump({
         'line': line.to_dict(),
         'particle': part.to_dict()},
-        fid, cls=xo.JEncoder)
+        fid, cls=xo.JEncoder, indent=4)
 
 lprofile = xf.LongitudinalProfileQGaussian(
         number_of_particles=bunch_intensity,
@@ -60,4 +65,4 @@ with open('line_with_spacecharge_and_particle.json', 'w') as fid:
     json.dump({
         'line': line.to_dict(),
         'particle': part.to_dict()},
-        fid, cls=xo.JEncoder)
+        fid, cls=xo.JEncoder, indent=4)

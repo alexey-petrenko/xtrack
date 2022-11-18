@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import pathlib
 import json
 import pickle
@@ -17,23 +22,23 @@ test_data_folder = pathlib.Path(
         __file__).parent.joinpath('../../test_data').absolute()
 
 fname_line_particles = test_data_folder.joinpath('lhc_no_bb/line_and_particle.json')
-rtol_100turns = 1e-9; atol_100turns=3e-11
+rtol_100turns = 1e-9; atol_100turns=5e-11
 
-# fname_line_particles = test_data_folder.joinpath(
-#                                 './lhc_with_bb/line_and_particle.json')
-# rtol_100turns = 1e-9; atol_100turns=3e-11
-
-# fname_line_particles = test_data_folder.joinpath(
-#                         './hllhc_14/line_and_particle.json')
-# rtol_100turns = 1e-9; atol_100turns=3e-11
-
-# fname_line_particles = test_data_folder.joinpath(
-#                  './sps_w_spacecharge/line_without_spacecharge_and_particle.json')
-# rtol_100turns = 1e-9; atol_100turns=3e-11
+fname_line_particles = test_data_folder.joinpath(
+                                  './lhc_with_bb/line_and_particle.json')
+rtol_100turns = 1e-9; atol_100turns=9e-10
 
 #fname_line_particles = test_data_folder.joinpath(
-#                   './sps_w_spacecharge/line_with_spacecharge_and_particle.json')
-#rtol_100turns = 2e-8; atol_100turns=7e-9
+#                          './hllhc_14/line_and_particle.json')
+#rtol_100turns = 1e-9; atol_100turns=8e-11
+
+# fname_line_particles = test_data_folder.joinpath(
+#                  './sps_w_spacecharge/line_no_spacecharge_and_particle.json')
+# rtol_100turns = 1e-9; atol_100turns=3e-11
+
+# fname_line_particles = test_data_folder.joinpath(
+#                    './sps_w_spacecharge/line_with_spacecharge_and_particle.json')
+# rtol_100turns = 2e-8; atol_100turns=7e-9
 
 short_test = False
 num_turns = int(100)
@@ -48,8 +53,8 @@ num_turns = int(100)
 n_part = 200
 context = xo.ContextCpu(omp_num_threads=0)
 
-#n_part = 20000
-#context = xo.ContextCupy()
+# n_part = 20000
+# context = xo.ContextCupy()
 
 #n_part = 20000
 #context = xo.ContextPyopencl('0.0')
@@ -103,8 +108,8 @@ part_ref = xp.Particles(**input_data['particle'])
 
 particles = xp.build_particles(_context=context,
     particle_ref=part_ref,
-    x=np.linspace(-1e-4, 1e-4, n_part),
-    y=np.linspace(-2e-4, 2e-4, n_part))
+    x=np.arange(-1e-4, 1e-4, 2e-4/n_part),
+    y=np.arange(-2e-4, 2e-4, 4e-4/n_part))
 
 #########
 # Track #
@@ -126,7 +131,7 @@ print(f'Time {(t2-t1)*1e6/num_turns/n_part:.2f} us/part/turn')
 
 testline = dtk.TestLine.from_dict(input_data['line'])
 
-ip_check = n_part//3*2
+ip_check = n_part//4*3
 
 print(f'\nTest against ducktrack over {num_turns} turns on particle {ip_check}:')
 vars_to_check = ['x', 'px', 'y', 'py', 'zeta', 'delta', 's']

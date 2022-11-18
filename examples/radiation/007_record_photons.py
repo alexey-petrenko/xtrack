@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import time
 import numpy as np
 
@@ -33,7 +38,7 @@ line.particle_ref = xp.Particles(
 print('Build tracker ...')
 tracker = xt.Tracker(line=line)
 
-tracker.configure_radiation(mode='quantum')
+tracker.configure_radiation(model='quantum')
 
 record = tracker.start_internal_logging_for_elements_of_type(
                                                 xt.Multipole, capacity=100000)
@@ -45,5 +50,8 @@ tracker.track(particles, num_turns=10)
 import matplotlib.pyplot as plt
 hist, bin_edges = np.histogram(record.photon_energy[:record._index.num_recorded], bins=100)
 plt.close('all')
-plt.loglog(bin_edges[1:], hist)
+plt.loglog(bin_edges[1:], hist/np.diff(bin_edges))
+plt.xlabel('Photon energy [eV]')
+plt.ylabel('dN/dE [1/eV]')
+plt.grid(True)
 plt.show()

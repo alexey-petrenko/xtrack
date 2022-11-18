@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 from scipy.constants import e as qe
 from scipy.constants import c as clight
@@ -41,6 +46,29 @@ class BeamBeam4D(Element):
         ("min_sigma_diff", "m", "Threshold to detect round beam", 1e-28),
         ("enabled", "", "Switch for closed orbit search", True),
     ]
+
+    @classmethod
+    def from_dict(cls, dct):
+        if 'other_beam_Sigma_11' in dct.keys():
+            # Comes from xfields
+            assert dct['other_beam_Sigma_13'] == 0
+            assert dct['ref_shift_x'] == 0
+            assert dct['ref_shift_y'] == 0
+
+            kwargs = {
+            "charge": dct["other_beam_q0"]*dct['other_beam_num_particles'],
+            "sigma_x": np.sqrt(dct["other_beam_Sigma_11"]),
+            "sigma_y": np.sqrt(dct["other_beam_Sigma_33"]),
+            "beta_r": dct["other_beam_beta0"],
+            "x_bb": dct["other_beam_shift_x"],
+            "y_bb": dct["other_beam_shift_y"],
+            "d_px": dct["post_subtract_px"],
+            "d_py": dct['post_subtract_py'],
+            }
+        else:
+            kwargs = dct
+
+        return cls(**kwargs)
 
     def track(self, p):
         if self.enabled:
@@ -216,6 +244,65 @@ class BeamBeam6D(Element):
         ("enabled", "", "Switch for closed orbit search", True),
     ]
 
+    @classmethod
+    def from_dict(cls, dct):
+
+        if 'slices_other_beam_Sigma_11_star' in dct.keys():
+            # Comes from xfields
+            x_st=np.array(dct['slices_other_beam_x_center_star'])
+            y_st=np.array(dct['slices_other_beam_y_center_star'])
+            zeta_st=np.array(dct['slices_other_beam_zeta_center_star'])
+
+            (_, _, _, _, z_slices, _) = _python_inv_boost_scalar(
+                    x_st=x_st,
+                    px_st=0*x_st,
+                    y_st=y_st,
+                    py_st=0*x_st,
+                    sigma_st=zeta_st,
+                    delta_st=0*x_st,
+                    sphi=dct['_sin_phi'],
+                    cphi=dct['_cos_phi'],
+                    tphi=dct['_tan_phi'],
+                    salpha=dct['_sin_alpha'],
+                    calpha=dct['_cos_alpha'])
+            kwargs = {
+                'phi': np.angle(dct['_cos_phi'] + 1j * dct['_sin_phi']),
+                'alpha': np.angle(dct['_cos_alpha'] + 1j * dct['_sin_alpha']),
+                'x_bb_co': dct['other_beam_shift_x'],
+                'y_bb_co': dct['other_beam_shift_y'],
+                'charge_slices': np.array(dct['slices_other_beam_num_particles']),
+                'zeta_slices': z_slices,
+                'sigma_11': dct['slices_other_beam_Sigma_11_star'][0],
+                'sigma_12': dct['slices_other_beam_Sigma_12_star'][0]*dct['_cos_phi'],
+                'sigma_13': dct['slices_other_beam_Sigma_13_star'][0],
+                'sigma_14': dct['slices_other_beam_Sigma_14_star'][0]*dct['_cos_phi'],
+                'sigma_22': dct['slices_other_beam_Sigma_22_star'][0]*dct['_cos_phi']*dct['_cos_phi'],
+                'sigma_23': dct['slices_other_beam_Sigma_23_star'][0]*dct['_cos_phi'],
+                'sigma_24': dct['slices_other_beam_Sigma_24_star'][0]*dct['_cos_phi']*dct['_cos_phi'],
+                'sigma_33': dct['slices_other_beam_Sigma_33_star'][0],
+                'sigma_34': dct['slices_other_beam_Sigma_34_star'][0]*dct['_cos_phi'],
+                'sigma_44': dct['slices_other_beam_Sigma_44_star'][0]*dct['_cos_phi']*dct['_cos_phi'],
+                'x_co': dct['ref_shift_x'],
+                'px_co': dct['ref_shift_px'],
+                'y_co': dct['ref_shift_y'],
+                'py_co': dct['ref_shift_py'],
+                'zeta_co': dct['ref_shift_zeta'],
+                'delta_co': dct['ref_shift_pzeta'],
+                'd_x': dct['post_subtract_x'],
+                'd_px': dct['post_subtract_px'],
+                'd_y': dct['post_subtract_y'],
+                'd_py': dct['post_subtract_py'],
+                'd_zeta': dct['post_subtract_zeta'],
+                'd_delta': dct['post_subtract_pzeta'],
+                'min_sigma_diff': dct['min_sigma_diff'],
+                'threshold_singular': dct['threshold_singular'],
+                'enabled': True
+                }
+        else:
+            kwargs = dct
+
+        return cls(**kwargs)
+
     def track(self, p):
         if self.enabled:
             bb6data = BB6Ddata.BB6D_init(
@@ -252,6 +339,7 @@ class BeamBeam6D(Element):
                 self.d_delta,
                 self.enabled,
             )
+            self._bb6ddata = bb6data
             (
                 x_ret,
                 px_ret,
@@ -265,7 +353,7 @@ class BeamBeam6D(Element):
                 p.y,
                 p.py,
                 p.zeta,
-                p.delta,
+                p.pzeta,
                 p.q0 * qe,
                 p.p0c / clight * qe,
                 bb6data,
@@ -281,3 +369,73 @@ class BeamBeam6D(Element):
                 p._update_delta(delta_ret)
             else:
                 p.delta = delta_ret
+
+
+def _python_inv_boost_scalar(x_st, px_st, y_st, py_st, sigma_st, delta_st,
+                  sphi, cphi, tphi, salpha, calpha):
+
+    pz_st = np.sqrt(
+        (1.0 + delta_st) * (1.0 + delta_st) - px_st * px_st - py_st * py_st
+    )
+    hx_st = px_st / pz_st
+    hy_st = py_st / pz_st
+    hsigma_st = 1.0 - (delta_st + 1) / pz_st
+
+    Det_L = (
+        1.0 / cphi
+        + (hx_st * calpha + hy_st * salpha - hsigma_st * sphi) * tphi
+    )
+
+    Linv_11 = (
+        1.0 / cphi + salpha * tphi * (hy_st - hsigma_st * salpha * sphi)
+    ) / Det_L
+    Linv_12 = (salpha * tphi * (hsigma_st * calpha * sphi - hx_st)) / Det_L
+    Linv_13 = (
+        -tphi
+        * (
+            calpha
+            - hx_st * salpha * salpha * sphi
+            + hy_st * calpha * salpha * sphi
+        )
+        / Det_L
+    )
+
+    Linv_21 = (calpha * tphi * (-hy_st + hsigma_st * salpha * sphi)) / Det_L
+    Linv_22 = (
+        1.0 / cphi + calpha * tphi * (hx_st - hsigma_st * calpha * sphi)
+    ) / Det_L
+    Linv_23 = (
+        -tphi
+        * (
+            salpha
+            - hy_st * calpha * calpha * sphi
+            + hx_st * calpha * salpha * sphi
+        )
+        / Det_L
+    )
+
+    Linv_31 = -hsigma_st * calpha * sphi / Det_L
+    Linv_32 = -hsigma_st * salpha * sphi / Det_L
+    Linv_33 = (1.0 + hx_st * calpha * sphi + hy_st * salpha * sphi) / Det_L
+
+    x_i = Linv_11 * x_st + Linv_12 * y_st + Linv_13 * sigma_st
+    y_i = Linv_21 * x_st + Linv_22 * y_st + Linv_23 * sigma_st
+    sigma_i = Linv_31 * x_st + Linv_32 * y_st + Linv_33 * sigma_st
+
+    h = (delta_st + 1.0 - pz_st) * cphi * cphi
+
+    px_i = px_st * cphi + h * calpha * tphi
+    py_i = py_st * cphi + h * salpha * tphi
+
+    delta_i = (
+        delta_st
+        + px_i * calpha * tphi
+        + py_i * salpha * tphi
+        - h * tphi * tphi
+    )
+
+    return x_i, px_i, y_i, py_i, sigma_i, delta_i
+
+_python_inv_boost = np.vectorize(_python_inv_boost_scalar,
+    excluded=("sphi", "cphi", "tphi", "salpha", "calpha"))
+

@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 
 DEFAULT_MATRIX_RESPONSIVENESS_TOL = 1e-15
@@ -52,9 +57,17 @@ def Rot2D(mu):
     return np.array([[ np.cos(mu), np.sin(mu)],
                      [-np.sin(mu), np.cos(mu)]])
 
-def compute_linear_normal_form(M, symplectify=True,
+def compute_linear_normal_form(M, symplectify=False, only_4d_block=False,
                         responsiveness_tol=DEFAULT_MATRIX_RESPONSIVENESS_TOL,
                         stability_tol=DEFAULT_MATRIX_STABILITY_TOL):
+
+    if only_4d_block:
+        M = M.copy()
+        M[4:, :] = 0
+        M[:, 4:] = 0
+        muz_dummy = np.pi/10
+        M[4:, 4:] = np.array([[np.cos(muz_dummy), np.sin(muz_dummy)],
+                              [-np.sin(muz_dummy), np.cos(muz_dummy)]])
 
     if np.abs(np.linalg.det(M)-1) > stability_tol:
         raise ValueError(

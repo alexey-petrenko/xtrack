@@ -1,4 +1,8 @@
-import pickle
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import json
 import pathlib
 import numpy as np
@@ -22,13 +26,13 @@ test_backtracker=True
 
 #fname_line_particles = test_data_folder.joinpath(
 #                                './lhc_with_bb/line_and_particle.json')
-#rtol_10turns = 1e-9; atol_10turns=1e-11
+#rtol_10turns = 1e-9; atol_10turns=2e-11
 #test_backtracker = False
 
-#fname_line_particles = test_data_folder.joinpath(
-#                         './hllhc_14/line_and_particle.json')
-#rtol_10turns = 1e-9; atol_10turns=1e-11
-#test_backtracker = False
+fname_line_particles = test_data_folder.joinpath(
+                         './hllhc_14/line_and_particle.json')
+rtol_10turns=1e-9; atol_10turns=1e-11 # 2e-10 needed for delta = 1e-3
+test_backtracker = False
 
 #fname_line_particles = test_data_folder.joinpath(
 #                    './sps_w_spacecharge/line_with_spacecharge_and_particle.json')
@@ -49,7 +53,6 @@ context = xo.ContextCpu()
 
 with open(fname_line_particles, 'r') as fid:
     input_data = json.load(fid)
-
 
 ##############
 # Get a line #
@@ -79,6 +82,10 @@ if test_backtracker:
 ######################
 particles = xp.Particles(_context=context, **input_data['particle'])
 
+# To test off momentum one can do the following:
+# #particles.delta = 1e-3
+# input_data['particle'] = particles.to_dict()
+
 #########
 # Track #
 #########
@@ -95,7 +102,7 @@ testline = dtk.TestLine.from_dict(input_data['line'])
 
 ip_check = 0
 vars_to_check = ['x', 'px', 'y', 'py', 'zeta', 'delta', 's']
-dtk_part = dtk.TestParticles.from_dict(input_data['particle'])
+dtk_part = dtk.TestParticles.from_dict(input_data['particle']).copy()
 for _ in range(n_turns):
    testline.track(dtk_part)
 
@@ -105,7 +112,7 @@ for vv in vars_to_check:
     passed = np.isclose(xt_value, dtk_value, rtol=rtol_10turns, atol=atol_10turns)
 
     if not passed:
-        print(f'Not passend on var {vv}!\n'
+        print(f'Not passed on var {vv}!\n'
               f'    dtk:   {dtk_value: .7e}\n'
               f'    xtrack: {xt_value: .7e}\n')
         raise ValueError
@@ -117,10 +124,10 @@ for vv in vars_to_check:
 if test_backtracker:
     backtracker.track(particles, num_turns=n_turns)
 
-    dtk_part = dtk.TestParticles.from_dict(input_data['particle'])
+    dtk_part = dtk.TestParticles.from_dict(input_data['particle']).copy()
 
     for vv in vars_to_check:
-        dtk_value = getattr(dtk_part, vv)
+        dtk_value = getattr(dtk_part, vv)[0]
         xt_value = context.nparray_from_context_array(getattr(particles, vv))[ip_check]
         passed = np.isclose(xt_value, dtk_value, rtol=rtol_10turns,
                             atol=atol_10turns)
@@ -138,15 +145,14 @@ if test_backtracker:
 # Check  ebe #
 ##############
 print('Check element-by-element against ducktrack...')
-dtk_part = dtk.TestParticles.from_dict(input_data['particle'])
+dtk_part = dtk.TestParticles.from_dict(input_data['particle']).copy()
 vars_to_check = ['x', 'px', 'y', 'py', 'zeta', 'delta', 's']
 problem_found = False
 diffs = []
 s_coord = []
 for ii, (eedtk, nn) in enumerate(zip(testline.elements, testline.element_names)):
-    vars_before = {vv :getattr(dtk_part, vv)[0] for vv in vars_to_check}
-    with particles._bypass_linked_vars():
-        particles.set_particle(ip_check, **dtk_part.to_dict())
+    vars_before = {vv: getattr(dtk_part, vv)[0] for vv in vars_to_check}
+    particles = xp.Particles.from_dict(dtk_part.to_dict(), _context=context)
 
     tracker.track(particles, ele_start=ii, num_elements=1)
 
@@ -154,7 +160,7 @@ for ii, (eedtk, nn) in enumerate(zip(testline.elements, testline.element_names))
     s_coord.append(dtk_part.s[0])
     diffs.append([])
     for vv in vars_to_check:
-        dtk_change = getattr(dtk_part, vv) - vars_before[vv]
+        dtk_change = getattr(dtk_part, vv)[0] - vars_before[vv]
         xt_change = (context.nparray_from_context_array(
                 getattr(particles, vv))[ip_check]- vars_before[vv])
         passed = np.isclose(xt_change, dtk_change, rtol=1e-10, atol=5e-14)
@@ -203,11 +209,11 @@ if not problem_found:
 import matplotlib.pyplot as plt
 plt.close('all')
 fig = plt.figure(1, figsize=(6.4*1.5, 4.8*1.3))
-for ii, (vv, uu) in enumerate(
+for ii_plt, (vv, uu) in enumerate(
         zip(['x', 'px', 'y', 'py', r'$\zeta$', r'$\delta$'],
             ['[m]', '[-]', '[m]', '[-]', '[m]', '[-]'])):
-    ax = fig.add_subplot(3, 2, ii+1)
-    ax.plot(s_coord, diffs[:, ii])
+    ax = fig.add_subplot(3, 2, ii_plt+1)
+    ax.plot(s_coord, diffs[:, ii_plt])
     ax.set_ylabel('Difference on '+ vv + ' ' + uu)
     ax.set_xlabel('s [m]')
 fig.subplots_adjust(hspace=.48)

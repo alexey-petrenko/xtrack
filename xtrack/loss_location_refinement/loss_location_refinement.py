@@ -1,3 +1,8 @@
+# copyright ############################### #
+# This file is part of the Xtrack Package.  #
+# Copyright (c) CERN, 2021.                 #
+# ######################################### #
+
 import numpy as np
 from scipy.spatial import ConvexHull
 
@@ -30,21 +35,21 @@ class LossLocationRefinement:
             self._original_tracker = tracker
             self.tracker = tracker
 
-        self._context = self.tracker._line_frozen._buffer.context
+        self._context = self.tracker._tracker_data._buffer.context
         assert self._context.__class__ is xo.ContextCpu, (
                 "Other contexts are not supported!")
 
         # Build a polygon and compile the kernel
-        temp_poly = LimitPolygon(_buffer=self.tracker._line_frozen._buffer,
+        temp_poly = LimitPolygon(_buffer=self.tracker._tracker_data._buffer,
                 x_vertices=[1,-1, -1, 1], y_vertices=[1,1,-1,-1])
         na = lambda a : np.array(a, dtype=np.float64)
         temp_poly.impact_point_and_normal(x_in=na([0]), y_in=na([0]), z_in=na([0]),
                                    x_out=na([2]), y_out=na([2]), z_out=na([0]))
 
         # Build track kernel with all elements + polygon
-        trk_gen = Tracker(_buffer=self.tracker._line_frozen._buffer,
+        trk_gen = Tracker(_buffer=self.tracker._tracker_data._buffer,
                 line=Line(
-                    elements=self.tracker._line_frozen.elements + (temp_poly,)),
+                    elements=self.tracker._tracker_data.elements + (temp_poly,)),
                     global_xy_limit=tracker.global_xy_limit)
         self._trk_gen = trk_gen
 
@@ -80,7 +85,7 @@ class LossLocationRefinement:
 
                 i_aper_1 = i_ap
                 i_aper_0 = self.i_apertures[self.i_apertures.index(i_ap) - 1]
-                logger.debug(f'{i_aper_1=}, {i_aper_0=}')
+                logger.debug(f'i_aper_1={i_aper_1}, i_aper_0={i_aper_0}')
 
                 s0, s1, _ = generate_interp_aperture_locations(self.tracker,
                                                    i_aper_0, i_aper_1, self.ds)
@@ -91,7 +96,7 @@ class LossLocationRefinement:
 
                 presence_shifts_rotations = check_for_active_shifts_and_rotations(
                                                     self.tracker, i_aper_0, i_aper_1)
-                logger.debug(f'{presence_shifts_rotations=}')
+                logger.debug(f'presence_shifts_rotations={presence_shifts_rotations}')
 
                 if (not(presence_shifts_rotations) and
                    apertures_are_identical(self.tracker.line.elements[i_aper_0],
@@ -198,6 +203,9 @@ def refine_loss_location_single_aperture(particles, i_aper_1, i_start_thin_0,
                                              i_aper_1 - n_backtrack : i_aper_1]:
         ee = interp_tracker._original_tracker.line.element_dict[nn]
         if not isinstance(ee, tuple(allowed_backtrack_types)):
+            if (hasattr(ee, 'skip_in_loss_location_refinement')
+                    and ee.skip_in_loss_location_refinement):
+                return 'skipped'
             raise TypeError(
                 f'Cannot backtrack through element {nn} of type '
                 f'{ee.__class__.__name__}')
@@ -205,15 +213,14 @@ def refine_loss_location_single_aperture(particles, i_aper_1, i_start_thin_0,
     backtracker.track(part_refine, ele_start=i_start_backtrack,
                       num_elements = n_backtrack)
     # Just for check
-    elem_backtrack = backtracker.line.elements[
-                        i_start_backtrack:i_start_backtrack + n_backtrack]
+    # elem_backtrack = backtracker.line.elements[
+    #                     i_start_backtrack:i_start_backtrack + n_backtrack]
 
     # Track with extra apertures
     interp_tracker.track(part_refine)
     # There is a small fraction of particles that are not lost.
     # We verified that they are really at the edge. Their coordinates
     # correspond to the end fo the short line, which is correct
-
 
     if inplace:
         indx_sorted = np.argsort(part_refine.particle_id)
@@ -319,8 +326,8 @@ def interp_aperture_using_polygons(context, tracker, backtracker,
 
 def generate_interp_aperture_locations(tracker, i_aper_0, i_aper_1, ds):
 
-    s0 = tracker._line_frozen.element_s_locations[i_aper_0]
-    s1 = tracker._line_frozen.element_s_locations[i_aper_1]
+    s0 = tracker._tracker_data.element_s_locations[i_aper_0]
+    s1 = tracker._tracker_data.element_s_locations[i_aper_1]
     assert s1>=s0
     n_segments = int(np.ceil((s1-s0)/ds))
     if n_segments <= 1:
@@ -341,7 +348,7 @@ def build_interp_tracker(_buffer, s0, s1, s_interp, aper_0, aper_1, aper_interp,
         ee = tracker.line.elements[i_ele]
         if not ee.__class__.__name__.startswith('Drift'):
             assert not hasattr(ee, 'isthick') or not ee.isthick
-            ss_ee = tracker._line_frozen.element_s_locations[i_ele]
+            ss_ee = tracker._tracker_data.element_s_locations[i_ele]
             elements.append(ee.copy(_buffer=_buffer))
             s_elements.append(ss_ee)
     i_sorted = np.argsort(s_elements)
@@ -416,7 +423,7 @@ def characterize_aperture(tracker, i_aperture, n_theta, r_max, dr,
         x_test = RR.flatten()*np.cos(TT.flatten())
         y_test = RR.flatten()*np.sin(TT.flatten())
 
-        logger.info(f'{iteration=} num_part={x_test.shape[0]}')
+        logger.info(f'iteration={iteration} num_part={x_test.shape[0]}')
 
         ptest = xp.Particles(p0c=1,
                 x = x_test.copy(),
